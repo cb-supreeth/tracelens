@@ -1,0 +1,5 @@
+rootProject.name = 'cb-tracelens'
+
+include 'tracelens-bridge'
+include 'tracelens-agent'
+include 'samples:line-spike'

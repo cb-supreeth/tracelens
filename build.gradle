@@ -1,0 +1,25 @@
+// cb-tracelens — FlowLens-inspired execution tracer for Chargebee services.
+// Root build file: shared config only; module specifics live in each module.
+
+allprojects {
+    group = 'com.chargebee'
+    version = '0.1.0-SNAPSHOT'
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
+}
