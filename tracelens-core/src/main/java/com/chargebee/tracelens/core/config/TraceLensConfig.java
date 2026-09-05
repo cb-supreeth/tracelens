@@ -70,6 +70,12 @@ public final class TraceLensConfig {
     /** Wrap tasks at executor hand-off points so traces survive thread pools. */
     private boolean instrumentExecutors = true;
 
+    /** SQS producer attribute injection + queueman consumer continuation. */
+    private boolean instrumentMessaging = true;
+
+    /** Synthetic traces for @Scheduled jobs. */
+    private boolean instrumentScheduled = true;
+
     /**
      * FlowLens requires both labels before registering a flow (protects capacity on
      * shared envs). Locally we default to auto-minting labels for unlabelled traffic.
@@ -240,6 +246,24 @@ public final class TraceLensConfig {
 
     public TraceLensConfig setInstrumentExecutors(boolean instrumentExecutors) {
         this.instrumentExecutors = instrumentExecutors;
+        return this;
+    }
+
+    public boolean isInstrumentMessaging() {
+        return instrumentMessaging;
+    }
+
+    public TraceLensConfig setInstrumentMessaging(boolean instrumentMessaging) {
+        this.instrumentMessaging = instrumentMessaging;
+        return this;
+    }
+
+    public boolean isInstrumentScheduled() {
+        return instrumentScheduled;
+    }
+
+    public TraceLensConfig setInstrumentScheduled(boolean instrumentScheduled) {
+        this.instrumentScheduled = instrumentScheduled;
         return this;
     }
 

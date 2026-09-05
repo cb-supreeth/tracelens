@@ -11,19 +11,26 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * One retained execution flow: an ordered timeline of events plus identity/metadata.
+ * One retained execution flow SEGMENT: an ordered timeline of events plus
+ * identity/metadata.
+ *
+ * traceId is the shared join key across segments/pods (an HTTP request and the SQS
+ * consumer it triggered share one traceId). segmentId is unique per segment and is
+ * the store's key. For a root segment, segmentId == traceId.
  *
  * Threading: events are appended from every thread the work hops across (servlet
- * threads, executor pools, queueman consumer). Appends are serialized per trace;
- * metadata reads are lock-free. Ordering across threads is by the per-trace sequence
- * number, assigned at append time.
+ * threads, executor pools, queueman consumer). Appends are serialized per segment;
+ * metadata reads are lock-free. Ordering across threads is by the per-segment
+ * sequence number, assigned at append time.
  */
 public final class Trace {
 
-    /** Hard per-trace cap so one runaway loop can't eat the whole store budget. */
+    /** Hard per-segment cap so one runaway loop can't eat the whole store budget. */
     public static final int DEFAULT_MAX_EVENTS_PER_TRACE = 50_000;
 
     private final String traceId;
+    private final String segmentId;
+    private final String parentSegmentId;
     private final String lensId;
     private final String user;
     private final EntryChannel entryChannel;
@@ -41,14 +48,27 @@ public final class Trace {
     private volatile Long endedAtMillis;
     private volatile boolean truncated;
 
+    /** Root segment: fresh traceId, segmentId == traceId. */
     public Trace(String lensId, String user, EntryChannel entryChannel, long nowMillis, long nowNanos) {
-        this(UUID.randomUUID().toString(), lensId, user, entryChannel, nowMillis, nowNanos,
+        this(UUID.randomUUID().toString(), null, null, lensId, user, entryChannel, nowMillis, nowNanos,
                 DEFAULT_MAX_EVENTS_PER_TRACE);
     }
 
     public Trace(String traceId, String lensId, String user, EntryChannel entryChannel,
                  long nowMillis, long nowNanos, int maxEventsPerTrace) {
+        this(traceId, null, null, lensId, user, entryChannel, nowMillis, nowNanos, maxEventsPerTrace);
+    }
+
+    /**
+     * @param traceId         join key (shared across segments)
+     * @param segmentId       unique per segment; null -> root segment (segmentId = traceId)
+     * @param parentSegmentId the segment that produced the hand-off message, if any
+     */
+    public Trace(String traceId, String segmentId, String parentSegmentId, String lensId, String user,
+                 EntryChannel entryChannel, long nowMillis, long nowNanos, int maxEventsPerTrace) {
         this.traceId = traceId;
+        this.segmentId = segmentId == null ? traceId : segmentId;
+        this.parentSegmentId = parentSegmentId;
         this.lensId = lensId;
         this.user = user;
         this.entryChannel = entryChannel;
@@ -129,6 +149,14 @@ public final class Trace {
 
     public String getTraceId() {
         return traceId;
+    }
+
+    public String getSegmentId() {
+        return segmentId;
+    }
+
+    public String getParentSegmentId() {
+        return parentSegmentId;
     }
 
     public String getLensId() {

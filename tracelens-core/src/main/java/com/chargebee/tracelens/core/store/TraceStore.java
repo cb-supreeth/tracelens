@@ -77,7 +77,7 @@ public final class TraceStore implements AutoCloseable {
             if (totalEvents.get() >= maxTrackedEvents) {
                 return false;
             }
-            traces.put(trace.getTraceId(), trace);
+            traces.put(trace.getSegmentId(), trace);
             return true;
         }
     }
@@ -119,6 +119,20 @@ public final class TraceStore implements AutoCloseable {
                     matches.add(trace);
                 }
             }
+            return matches;
+        }
+    }
+
+    /** All retained segments of one logical trace (the join key), oldest first. */
+    public List<Trace> findByTraceId(String traceId) {
+        synchronized (traces) {
+            List<Trace> matches = new ArrayList<>();
+            for (Trace trace : traces.values()) {
+                if (traceId.equals(trace.getTraceId())) {
+                    matches.add(trace);
+                }
+            }
+            matches.sort(Comparator.comparingLong(Trace::getStartedAtMillis));
             return matches;
         }
     }
@@ -191,7 +205,7 @@ public final class TraceStore implements AutoCloseable {
             List<String> idle = new ArrayList<>();
             for (Trace trace : traces.values()) {
                 if (now - trace.getLastActivityNanos() > idleTtlNanos) {
-                    idle.add(trace.getTraceId());
+                    idle.add(trace.getSegmentId());
                 }
             }
             idle.forEach(this::remove);
@@ -236,7 +250,7 @@ public final class TraceStore implements AutoCloseable {
     private void removeEldest() {
         traces.values().stream()
                 .min(Comparator.comparingLong(Trace::getLastActivityNanos))
-                .ifPresent(eldest -> remove(eldest.getTraceId()));
+                .ifPresent(eldest -> remove(eldest.getSegmentId()));
     }
 
     private Trace remove(String traceId) {

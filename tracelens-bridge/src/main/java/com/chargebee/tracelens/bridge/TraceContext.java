@@ -25,6 +25,12 @@ public final class TraceContext {
         return snapshot == null ? null : snapshot.getTraceId();
     }
 
+    /** Event routing key: the current segment id (events belong to one segment). */
+    public static String currentSegmentId() {
+        TraceSnapshot snapshot = CURRENT.get();
+        return snapshot == null ? null : snapshot.getSegmentId();
+    }
+
     /** Activate a snapshot; returns a scope that restores the previous one on close. */
     public static TraceScope activate(TraceSnapshot snapshot) {
         TraceSnapshot previous = CURRENT.get();

@@ -108,31 +108,37 @@ public class TraceLensAutoConfiguration {
                 "/tracelens/*");
     }
 
-    /** Installs the core sink into the bridge and starts the TTL sweeper. */
+    /** Installs the core sink + lifecycle listener into the bridge; starts the sweeper. */
     @Bean
-    TraceLensLifecycle traceLensLifecycle(TraceStore store) {
-        return new TraceLensLifecycle(store);
+    TraceLensLifecycle traceLensLifecycle(TraceStore store, Tracer tracer) {
+        return new TraceLensLifecycle(store, tracer);
     }
 
     static final class TraceLensLifecycle implements org.springframework.context.SmartLifecycle,
             DisposableBean {
 
         private final TraceStore store;
+        private final Tracer tracer;
         private volatile boolean running;
 
-        TraceLensLifecycle(TraceStore store) {
+        TraceLensLifecycle(TraceStore store, Tracer tracer) {
             this.store = store;
+            this.tracer = tracer;
         }
 
         @Override
         public void start() {
             TraceRecording.install(store);
+            // agent-driven entry points (queueman consumer, @Scheduled jobs)
+            com.chargebee.tracelens.bridge.TraceRuntime.registerLifecycleListener(
+                    new com.chargebee.tracelens.core.record.TraceLifecycle(tracer));
             store.startSweeper();
             running = true;
         }
 
         @Override
         public void stop() {
+            com.chargebee.tracelens.bridge.TraceRuntime.unregisterLifecycleListener();
             TraceRecording.uninstall();
             store.close();
             running = false;

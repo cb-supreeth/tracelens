@@ -21,7 +21,11 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.jar.JarFile;
 
+import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
+import static net.bytebuddy.matcher.ElementMatchers.isAbstract;
+import static net.bytebuddy.matcher.ElementMatchers.isAnnotatedWith;
 import static net.bytebuddy.matcher.ElementMatchers.isDefaultFinalizer;
+import static net.bytebuddy.matcher.ElementMatchers.isInterface;
 import static net.bytebuddy.matcher.ElementMatchers.isSynthetic;
 import static net.bytebuddy.matcher.ElementMatchers.nameContains;
 import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
@@ -29,6 +33,7 @@ import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.none;
 import static net.bytebuddy.matcher.ElementMatchers.not;
 import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
+import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
 
 /**
  * tracelens agent: line-level + method-level capture for configured packages.
@@ -74,6 +79,12 @@ public final class TraceLensAgent {
             DynamicType.Builder<?> out = builder.visit(LineEmittingVisitor.forMethods());
             if (methodAdvice != null) {
                 out = out.visit(methodAdvice);
+            }
+            if (config.isInstrumentScheduled()) {
+                // synthetic traces for @Scheduled jobs (line/method events still apply)
+                out = out.visit(Advice.to(ScheduledJobAdvice.class)
+                        .on(isAnnotatedWith(named("org.springframework.scheduling.annotation.Scheduled"))
+                                .and(LineEmittingVisitor.INSTRUMENTABLE_METHOD)));
             }
             return out;
         };
@@ -128,6 +139,9 @@ public final class TraceLensAgent {
 
         if (config.isInstrumentExecutors()) {
             installExecutorInstrumentation(inst);
+        }
+        if (config.isInstrumentMessaging()) {
+            installMessagingInstrumentation(inst);
         }
 
         long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
@@ -246,6 +260,39 @@ public final class TraceLensAgent {
             log("executor instrumentation installed (ThreadPoolExecutor, ScheduledThreadPoolExecutor)");
         } catch (Throwable t) {
             log("executor instrumentation failed (continuing without it): " + t);
+        }
+    }
+
+    /**
+     * Async correlation seams: SQS producer attribute injection (AWS SDK v1) and
+     * queueman consumer continuation. App-loaded classes, so plain ignore rules are
+     * fine; RETRANSFORMATION covers anything loaded before premain completed.
+     */
+    private static void installMessagingInstrumentation(Instrumentation inst) {
+        try {
+            new AgentBuilder.Default()
+                    .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                    .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
+                    .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
+                    .type(hasSuperType(named("com.amazonaws.services.sqs.AmazonSQS"))
+                            .and(not(isInterface())).and(not(isAbstract())))
+                    .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
+                            builder.visit(Advice.to(SqsProducerAdvice.class)
+                                    .on(named("sendMessage").and(takesArguments(1)))))
+                    .installOn(inst);
+
+            new AgentBuilder.Default()
+                    .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                    .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
+                    .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
+                    .type(named("com.chargebee.queueman.listener.AbstractQueuemanMessageHandler"))
+                    .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
+                            builder.visit(Advice.to(QueuemanConsumerAdvice.class)
+                                    .on(named("processMessage").and(takesArguments(3)))))
+                    .installOn(inst);
+            log("messaging instrumentation installed (sqs producer, queueman consumer)");
+        } catch (Throwable t) {
+            log("messaging instrumentation failed (continuing without it): " + t);
         }
     }
 

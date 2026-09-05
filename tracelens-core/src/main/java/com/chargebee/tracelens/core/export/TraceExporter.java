@@ -41,6 +41,8 @@ public final class TraceExporter {
     public ObjectNode toJson(Trace trace) {
         ObjectNode root = mapper.createObjectNode();
         root.put("traceId", trace.getTraceId());
+        root.put("segmentId", trace.getSegmentId());
+        putIfNotNull(root, "parentSegmentId", trace.getParentSegmentId());
         putIfNotNull(root, "lensId", trace.getLensId());
         putIfNotNull(root, "user", trace.getUser());
         root.put("entryChannel", trace.getEntryChannel().name());

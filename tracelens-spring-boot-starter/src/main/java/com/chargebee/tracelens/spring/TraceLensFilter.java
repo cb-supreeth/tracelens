@@ -96,8 +96,8 @@ public final class TraceLensFilter implements Filter {
         }
 
         Tracer.ActiveTrace trace = maybeTrace.get();
-        req.setAttribute(TRACE_ID_ATTRIBUTE, trace.traceId());
-        res.setHeader(TRACE_ID_HEADER, trace.traceId());
+        req.setAttribute(TRACE_ID_ATTRIBUTE, trace.segmentId());
+        res.setHeader(TRACE_ID_HEADER, trace.segmentId());
         try {
             chain.doFilter(request, response);
         } catch (Throwable t) {

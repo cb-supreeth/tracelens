@@ -8,6 +8,7 @@ import com.chargebee.tracelens.core.trace.TraceStatus;
 public final class TraceSummary {
 
     private final String traceId;
+    private final String segmentId;
     private final String lensId;
     private final String user;
     private final EntryChannel entryChannel;
@@ -20,6 +21,7 @@ public final class TraceSummary {
 
     public TraceSummary(Trace trace) {
         this.traceId = trace.getTraceId();
+        this.segmentId = trace.getSegmentId();
         this.lensId = trace.getLensId();
         this.user = trace.getUser();
         this.entryChannel = trace.getEntryChannel();
@@ -33,6 +35,11 @@ public final class TraceSummary {
 
     public String getTraceId() {
         return traceId;
+    }
+
+    /** The store key — export by this id. */
+    public String getSegmentId() {
+        return segmentId;
     }
 
     public String getLensId() {
