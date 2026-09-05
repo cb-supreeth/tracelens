@@ -8,9 +8,12 @@ dependencies {
     // agent never clashes with the app's own ByteBuddy (Hibernate) on the classpath.
     implementation 'net.bytebuddy:byte-buddy:1.15.11'
 
-    // compileOnly (NOT implementation): the bridge must exist exactly once, in the
-    // bootstrap loader, or we get loader-constraint LinkageErrors. Its jar is embedded
-    // as a resource below and injected into bootstrap at premain.
+    // Core is shaded in (relocated) for tracelens.json parsing at premain. The bridge
+    // is EXCLUDED — it must exist exactly once, in the bootstrap loader (injected at
+    // premain), or we get loader-constraint LinkageErrors.
+    implementation(project(':tracelens-core')) {
+        exclude group: 'com.chargebee', module: 'tracelens-bridge'
+    }
     compileOnly project(':tracelens-bridge')
 }
 
@@ -28,8 +31,12 @@ shadowJar {
     // copying it (Shadow treats archive sources as zip trees). Embedding happens in
     // processResources below instead — plain Copy semantics, jar copied as a file.
 
-    // Relocate everything third-party so the agent is self-contained and clash-free.
+    // Relocate everything third-party (and core — the agent only uses it to parse
+    // config at premain) so the agent is self-contained and clash-free. The bridge is
+    // deliberately NOT shaded or relocated: woven bytecode references it by name.
     relocate 'net.bytebuddy', 'com.chargebee.tracelens.shaded.bytebuddy'
+    relocate 'com.fasterxml.jackson', 'com.chargebee.tracelens.shaded.jackson'
+    relocate 'com.chargebee.tracelens.core', 'com.chargebee.tracelens.shaded.core'
 
     manifest {
         attributes(

@@ -1,4 +1,4 @@
-package com.chargebee.tracelens.core.context;
+package com.chargebee.tracelens.bridge;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;

@@ -48,6 +48,7 @@ public final class TraceExporter {
         root.put("applicationVersion", config.getApplicationVersion());
         root.put("status", trace.getStatus().name());
         root.put("startedAt", trace.getStartedAtMillis());
+        root.put("startNanos", trace.getStartNanos());
         if (trace.getEndedAtMillis() != null) {
             root.put("endedAt", trace.getEndedAtMillis().longValue());
             root.put("durationMs", trace.durationMillis().longValue());

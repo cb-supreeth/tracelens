@@ -1,4 +1,4 @@
-package com.chargebee.tracelens.core.context;
+package com.chargebee.tracelens.bridge;
 
 /**
  * AutoCloseable scope returned by {@link TraceContext#activate}. Restores the

@@ -2,6 +2,11 @@ plugins {
     id 'application'
 }
 
+dependencies {
+    // Full-path spike drives the core store/exporter directly (no Spring needed).
+    implementation project(':tracelens-core')
+}
+
 application {
     mainClass = 'com.chargebee.ems.sample.SpikeApp'
 }

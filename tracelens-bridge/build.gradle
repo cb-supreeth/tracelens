@@ -1,6 +1,19 @@
 // tracelens-bridge: the ONLY classes woven bytecode may reference. Kept tiny and
 // dependency-free — the agent embeds this jar and injects it into the bootstrap
 // classloader at premain, so every instrumented classloader can see it.
+//
+// Contains: TraceRuntime (woven-code API + sink SPI), TraceContext/Snapshot/Scope
+// (the correlation seam shared by the agent, the starter and executor hops).
 plugins {
-    id 'java'
+    id 'java-library'
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.assertj:assertj-core:3.25.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
 }

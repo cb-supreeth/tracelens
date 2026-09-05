@@ -18,7 +18,7 @@ import static net.bytebuddy.matcher.ElementMatchers.isSynthetic;
 import static net.bytebuddy.matcher.ElementMatchers.not;
 
 /**
- * Emits {@code TraceRecorder.onLine(fqcn, line)} at every line-number attribute of
+ * Emits {@code TraceRuntime.onLine(fqcn, line)} at every line-number attribute of
  * every matched method. This is the core of line-level capture: javac records one
  * line-number entry per source line that produced bytecode, so hooking
  * {@link MethodVisitor#visitLineNumber} gives us exact executed-line events.
@@ -52,7 +52,7 @@ final class LineEmittingVisitor {
 
     private static final class LineEmittingMethodVisitor extends MethodVisitor {
 
-        private static final String RECORDER = "com/chargebee/tracelens/bridge/TraceRecorder";
+        private static final String RECORDER = "com/chargebee/tracelens/bridge/TraceRuntime";
 
         private final String fqcn;
         private boolean injectionAllowed;

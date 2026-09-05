@@ -1,0 +1,16 @@
+{
+  "applicationId": "cb-ems",
+  "applicationVersion": "LOCAL",
+  "packages": ["com.chargebee.ems"],
+  "excludedPackages": ["com.chargebee.ems.api.model"],
+  "blacklistedNodes": ["ToStringBuilder"],
+  "capturePayloads": false,
+  "maxTrackedEvents": 500000,
+  "maxTrackedRequests": 200,
+  "idleTtlMinutes": 60,
+  "evictOnExport": true,
+  "trackMethods": true,
+  "trackExceptions": true,
+  "requireLabels": false,
+  "contextParams": { "jvmArgs": ["aws.profile.name"] }
+}

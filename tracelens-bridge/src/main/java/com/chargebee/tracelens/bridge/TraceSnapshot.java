@@ -1,4 +1,4 @@
-package com.chargebee.tracelens.core.context;
+package com.chargebee.tracelens.bridge;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;

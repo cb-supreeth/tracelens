@@ -77,7 +77,7 @@ public final class Trace {
             TraceEvent.Builder ordered = TraceEvent.builder(event.getType())
                     .seq(eventSeq)
                     .epochMillis(event.getEpochMillis())
-                    .offsetNanos(event.getOffsetNanos())
+                    .nanoTime(event.getNanoTime())
                     .thread(event.getThread())
                     .className(event.getClassName())
                     .methodName(event.getMethodName())

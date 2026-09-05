@@ -1,0 +1,13 @@
+{
+  "applicationId": "line-spike",
+  "applicationVersion": "LOCAL",
+  "packages": ["com.chargebee.ems"],
+  "capturePayloads": false,
+  "maxTrackedEvents": 500000,
+  "maxTrackedRequests": 200,
+  "idleTtlMinutes": 60,
+  "evictOnExport": true,
+  "trackMethods": true,
+  "trackExceptions": true,
+  "requireLabels": false
+}

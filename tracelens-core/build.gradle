@@ -6,7 +6,14 @@ plugins {
 }
 
 dependencies {
-    // Jackson is the only dependency (config parsing + export serialization).
+    // The bridge: correlation context + the runtime SPI the agent emits into.
+    // At runtime in an agent-attached JVM these classes come from bootstrap (agent
+    // injection); on the app classpath they are simply shadowed by that copy — which
+    // also means the starter works in no-agent mode (context/debug API fine, just no
+    // woven events).
+    api project(':tracelens-bridge')
+
+    // Jackson is the only third-party dependency (config parsing + export).
     // The app provides it at runtime via Spring Boot; the agent shades it relocated.
     api 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
 

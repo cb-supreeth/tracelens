@@ -15,8 +15,8 @@ public final class TraceEvent {
 
     private final long seq;
     private final long epochMillis;
-    /** Nanoseconds since the owning trace started — ordering + durations within a trace. */
-    private final long offsetNanos;
+    /** Absolute System.nanoTime() at capture; the owning trace derives relative offsets. */
+    private final long nanoTime;
     private final String thread;
     private final EventType type;
     private final String className;
@@ -28,7 +28,7 @@ public final class TraceEvent {
     private TraceEvent(Builder b) {
         this.seq = b.seq;
         this.epochMillis = b.epochMillis;
-        this.offsetNanos = b.offsetNanos;
+        this.nanoTime = b.nanoTime;
         this.thread = b.thread;
         this.type = b.type;
         this.className = b.className;
@@ -46,8 +46,8 @@ public final class TraceEvent {
         return epochMillis;
     }
 
-    public long getOffsetNanos() {
-        return offsetNanos;
+    public long getNanoTime() {
+        return nanoTime;
     }
 
     public String getThread() {
@@ -82,28 +82,28 @@ public final class TraceEvent {
         return new Builder(type);
     }
 
-    public static TraceEvent line(long seq, long epochMillis, long offsetNanos, String thread,
+    public static TraceEvent line(long seq, long epochMillis, long nanoTime, String thread,
                                   String fqcn, int line) {
-        return builder(EventType.LINE).seq(seq).epochMillis(epochMillis).offsetNanos(offsetNanos)
+        return builder(EventType.LINE).seq(seq).epochMillis(epochMillis).nanoTime(nanoTime)
                 .thread(thread).className(fqcn).line(line).build();
     }
 
-    public static TraceEvent method(long seq, long epochMillis, long offsetNanos, String thread,
+    public static TraceEvent method(long seq, long epochMillis, long nanoTime, String thread,
                                     EventType enterOrExit, String fqcn, String method) {
-        return builder(enterOrExit).seq(seq).epochMillis(epochMillis).offsetNanos(offsetNanos)
+        return builder(enterOrExit).seq(seq).epochMillis(epochMillis).nanoTime(nanoTime)
                 .thread(thread).className(fqcn).methodName(method).build();
     }
 
-    public static TraceEvent exception(long seq, long epochMillis, long offsetNanos, String thread,
+    public static TraceEvent exception(long seq, long epochMillis, long nanoTime, String thread,
                                        String fqcn, String method, String exceptionType, String exceptionMessage) {
-        return builder(EventType.EXCEPTION).seq(seq).epochMillis(epochMillis).offsetNanos(offsetNanos)
+        return builder(EventType.EXCEPTION).seq(seq).epochMillis(epochMillis).nanoTime(nanoTime)
                 .thread(thread).className(fqcn).methodName(method)
                 .message(exceptionMessage)
                 .attr("exceptionType", exceptionType).build();
     }
 
-    public static TraceEvent marker(long seq, long epochMillis, long offsetNanos, String thread, String text) {
-        return builder(EventType.MARKER).seq(seq).epochMillis(epochMillis).offsetNanos(offsetNanos)
+    public static TraceEvent marker(long seq, long epochMillis, long nanoTime, String thread, String text) {
+        return builder(EventType.MARKER).seq(seq).epochMillis(epochMillis).nanoTime(nanoTime)
                 .thread(thread).message(text).build();
     }
 
@@ -111,7 +111,7 @@ public final class TraceEvent {
         private final EventType type;
         private long seq;
         private long epochMillis;
-        private long offsetNanos;
+        private long nanoTime;
         private String thread;
         private String className;
         private String methodName;
@@ -133,8 +133,8 @@ public final class TraceEvent {
             return this;
         }
 
-        public Builder offsetNanos(long offsetNanos) {
-            this.offsetNanos = offsetNanos;
+        public Builder nanoTime(long nanoTime) {
+            this.nanoTime = nanoTime;
             return this;
         }
 
