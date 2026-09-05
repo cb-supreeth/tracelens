@@ -1,0 +1,38 @@
+// tracelens-spring-boot-starter: thin Spring adapter — servlet filter (trace entry),
+// /tracelens/* debug servlet (plain jakarta.servlet, portable to cb-framework),
+// lifecycle wiring. All capture/correlation mechanics live in core/bridge; this
+// module is only wiring.
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+dependencies {
+    api project(':tracelens-core')
+
+    // Provided by the hosting Spring Boot app at runtime.
+    compileOnly 'org.springframework.boot:spring-boot-autoconfigure:3.2.12'
+    compileOnly 'org.springframework:spring-web:6.1.14'
+    compileOnly 'jakarta.servlet:jakarta.servlet-api:6.0.0'
+    // For the /tracelens/** auth exemption; the security auto-config only loads when
+    // Spring Security is present (@ConditionalOnClass).
+    compileOnly 'org.springframework.security:spring-security-config:6.2.7'
+    compileOnly 'org.springframework.security:spring-security-web:6.2.7'
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor:3.2.12'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-web:3.2.12'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test:3.2.12'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
+}

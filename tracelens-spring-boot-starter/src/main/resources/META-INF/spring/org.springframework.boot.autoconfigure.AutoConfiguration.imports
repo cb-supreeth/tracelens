@@ -1,0 +1,2 @@
+com.chargebee.tracelens.spring.TraceLensAutoConfiguration
+com.chargebee.tracelens.spring.TraceLensSecurityAutoConfiguration

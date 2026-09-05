@@ -48,28 +48,39 @@ public final class TraceContext {
      * Capture the current snapshot into a task for executor hops. Used by the
      * starter's TaskDecorators and the agent's Executor advice alike — this is how a
      * trace survives thread pools without OTel's executor instrumentation.
+     * Already-wrapped tasks (TracedTask) and no-trace tasks pass through untouched.
      */
     public static Runnable wrap(Runnable task) {
         TraceSnapshot snapshot = CURRENT.get();
-        if (snapshot == null) {
+        if (snapshot == null || task instanceof TracedTask) {
             return task;
         }
-        return () -> {
-            try (TraceScope ignored = activate(snapshot)) {
-                task.run();
+        TraceRuntime.noteWrappedTask();
+        class Wrapped implements Runnable, TracedTask {
+            @Override
+            public void run() {
+                try (TraceScope ignored = activate(snapshot)) {
+                    task.run();
+                }
             }
-        };
+        }
+        return new Wrapped();
     }
 
     public static <T> java.util.concurrent.Callable<T> wrap(java.util.concurrent.Callable<T> task) {
         TraceSnapshot snapshot = CURRENT.get();
-        if (snapshot == null) {
+        if (snapshot == null || task instanceof TracedTask) {
             return task;
         }
-        return () -> {
-            try (TraceScope ignored = activate(snapshot)) {
-                return task.call();
+        TraceRuntime.noteWrappedTask();
+        class Wrapped implements java.util.concurrent.Callable<T>, TracedTask {
+            @Override
+            public T call() throws Exception {
+                try (TraceScope ignored = activate(snapshot)) {
+                    return task.call();
+                }
             }
-        };
+        }
+        return new Wrapped();
     }
 }

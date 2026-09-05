@@ -31,6 +31,16 @@ public final class TraceRuntime {
     private static final AtomicLong EMITTED = new AtomicLong();
     private static final AtomicLong DROPPED_NO_SINK = new AtomicLong();
     private static final AtomicLong DROPPED_NO_TRACE = new AtomicLong();
+    private static final AtomicLong WRAPPED_TASKS = new AtomicLong();
+
+    /** Called by TraceContext.wrap when a task is actually wrapped (diagnostics). */
+    public static void noteWrappedTask() {
+        WRAPPED_TASKS.incrementAndGet();
+    }
+
+    public static long wrappedTaskCount() {
+        return WRAPPED_TASKS.get();
+    }
 
     private TraceRuntime() {
     }

@@ -67,6 +67,9 @@ public final class TraceLensConfig {
     /** Turn thrown exceptions into timeline events. */
     private boolean trackExceptions = true;
 
+    /** Wrap tasks at executor hand-off points so traces survive thread pools. */
+    private boolean instrumentExecutors = true;
+
     /**
      * FlowLens requires both labels before registering a flow (protects capacity on
      * shared envs). Locally we default to auto-minting labels for unlabelled traffic.
@@ -228,6 +231,15 @@ public final class TraceLensConfig {
 
     public TraceLensConfig setTrackExceptions(boolean trackExceptions) {
         this.trackExceptions = trackExceptions;
+        return this;
+    }
+
+    public boolean isInstrumentExecutors() {
+        return instrumentExecutors;
+    }
+
+    public TraceLensConfig setInstrumentExecutors(boolean instrumentExecutors) {
+        this.instrumentExecutors = instrumentExecutors;
         return this;
     }
 

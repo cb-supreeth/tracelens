@@ -6,6 +6,7 @@
 // (the correlation seam shared by the agent, the starter and executor hops).
 plugins {
     id 'java-library'
+    id 'maven-publish'
 }
 
 dependencies {
@@ -16,4 +17,12 @@ dependencies {
 
 test {
     useJUnitPlatform()
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
 }

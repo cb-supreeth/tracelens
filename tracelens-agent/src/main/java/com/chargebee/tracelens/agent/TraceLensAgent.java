@@ -1,8 +1,10 @@
 package com.chargebee.tracelens.agent;
 
+import com.chargebee.tracelens.bridge.AgentStatus;
 import com.chargebee.tracelens.bridge.TraceRuntime;
 import com.chargebee.tracelens.core.config.TraceLensConfig;
 import com.chargebee.tracelens.core.config.TraceLensConfigLoader;
+import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.asm.AsmVisitorWrapper;
@@ -15,14 +17,18 @@ import java.io.File;
 import java.lang.instrument.Instrumentation;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.jar.JarFile;
 
+import static net.bytebuddy.matcher.ElementMatchers.isDefaultFinalizer;
 import static net.bytebuddy.matcher.ElementMatchers.isSynthetic;
 import static net.bytebuddy.matcher.ElementMatchers.nameContains;
 import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
+import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.none;
 import static net.bytebuddy.matcher.ElementMatchers.not;
+import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
 
 /**
  * tracelens agent: line-level + method-level capture for configured packages.
@@ -55,6 +61,16 @@ public final class TraceLensAgent {
         AsmVisitorWrapper methodAdvice = selectMethodAdvice(config);
 
         AgentBuilder.Transformer transformer = (builder, typeDescription, classLoader, module, protectionDomain) -> {
+            String debugMethods = System.getProperty("tracelens.debugMethods");
+            if (debugMethods != null) {
+                typeDescription.getDeclaredMethods().forEach(md -> {
+                    if (md.getName().contains(debugMethods)) {
+                        log("debug-method " + typeDescription.getName() + "." + md.getName()
+                                + " synthetic=" + md.isSynthetic() + " isMethod=" + md.isMethod()
+                                + " matches=" + LineEmittingVisitor.INSTRUMENTABLE_METHOD.matches(md));
+                    }
+                });
+            }
             DynamicType.Builder<?> out = builder.visit(LineEmittingVisitor.forMethods());
             if (methodAdvice != null) {
                 out = out.visit(methodAdvice);
@@ -62,7 +78,16 @@ public final class TraceLensAgent {
             return out;
         };
 
-        new AgentBuilder.Default()
+        // CRITICAL: ByteBuddy's default ignores ALL synthetic methods for
+        // instrumentation — which silently drops lambda bodies (lambda$... are
+        // synthetic), exactly where modern Java business logic lives. Override to
+        // ignore only the default finalizer; method-level scoping stays with
+        // INSTRUMENTABLE_METHOD (lambdas in, other synthetics out).
+        new AgentBuilder.Default(new ByteBuddy().ignore(isDefaultFinalizer()))
+                // REDEFINE (not the default REBASE): rebase renames original methods and
+                // adds delegating stubs — adding methods is illegal under retransformation
+                // and needlessly complicates the woven output for pure visitors/advice.
+                .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
                 .ignore(nameStartsWith("com.chargebee.tracelens.")
                         .or(nameStartsWith("net.bytebuddy."))
                         .or(nameStartsWith("com.chargebee.tracelens.shaded."))
@@ -78,6 +103,8 @@ public final class TraceLensAgent {
                     public void onTransformation(TypeDescription typeDescription, ClassLoader classLoader,
                                                  JavaModule module, boolean loaded, DynamicType dynamicType) {
                         INSTRUMENTED_CLASSES.incrementAndGet();
+                        AgentStatus.noteInstrumentedClass(typeDescription.getName());
+                        dumpClass(typeDescription, dynamicType);
                     }
 
                     @Override
@@ -89,6 +116,7 @@ public final class TraceLensAgent {
                     public void onError(String typeName, ClassLoader classLoader, JavaModule module,
                                         boolean loaded, Throwable throwable) {
                         FAILED_CLASSES.incrementAndGet();
+                        AgentStatus.noteFailedClass();
                         log("FAILED to instrument " + typeName + ": " + throwable);
                     }
 
@@ -98,11 +126,17 @@ public final class TraceLensAgent {
                 })
                 .installOn(inst);
 
+        if (config.isInstrumentExecutors()) {
+            installExecutorInstrumentation(inst);
+        }
+
         long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
+        AgentStatus.reportPremain(elapsedMs, config.getPackages().toString());
         log("premain done in " + elapsedMs + " ms; packages=" + config.getPackages()
                 + " excluded=" + config.getExcludedPackages()
                 + " trackMethods=" + config.isTrackMethods()
-                + " trackExceptions=" + config.isTrackExceptions());
+                + " trackExceptions=" + config.isTrackExceptions()
+                + " instrumentExecutors=" + config.isInstrumentExecutors());
 
         Runtime.getRuntime().addShutdownHook(new Thread(TraceLensAgent::printSummary, "tracelens-summary"));
     }
@@ -147,6 +181,74 @@ public final class TraceLensAgent {
         return matcher;
     }
 
+    /**
+     * Task wrapping at executor hand-off points (OTel's executors module equivalent).
+     * JDK classes are already loaded when premain runs, so this needs retransformation.
+     * Failure here must not kill line capture — log and move on.
+     */
+    private static void installExecutorInstrumentation(Instrumentation inst) {
+        try {
+            AgentBuilder.RedefinitionStrategy.Listener redefinitionErrors =
+                    new AgentBuilder.RedefinitionStrategy.Listener() {
+                        @Override
+                        public void onBatch(int index, java.util.List<Class<?>> batch,
+                                            java.util.List<Class<?>> types) {
+                        }
+
+                        @Override
+                        public Iterable<? extends java.util.List<Class<?>>> onError(int index,
+                                java.util.List<Class<?>> batch, Throwable throwable,
+                                java.util.List<Class<?>> types) {
+                            log("executor retransformation error for " + batch + ": " + throwable);
+                            return java.util.Collections.emptyList();
+                        }
+
+                        @Override
+                        public void onComplete(int amount, java.util.List<Class<?>> types,
+                                               java.util.Map<java.util.List<Class<?>>, Throwable> failures) {
+                            if (!failures.isEmpty()) {
+                                log("executor retransformation failures: " + failures);
+                            }
+                        }
+                    };
+
+            new AgentBuilder.Default()
+                    .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                    .with(redefinitionErrors)
+                    // REDEFINE: the default REBASE adds renamed-method stubs, which
+                    // retransformation forbids ("attempted to add a method").
+                    .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
+                    // CRITICAL: AgentBuilder's default ignore excludes ALL
+                    // bootstrap/extension-loaded types — which is exactly where JDK
+                    // executors live. Override to keep only the self-protection rules.
+                    .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
+                    .type(named("java.util.concurrent.ThreadPoolExecutor"))
+                    .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
+                            builder.visit(Advice.to(ExecutorTraceAdvice.WrapRunnable.class)
+                                    .on(named("execute").and(takesArgument(0, Runnable.class)))))
+                    .installOn(inst);
+
+            new AgentBuilder.Default()
+                    .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                    .with(redefinitionErrors)
+                    .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
+                    .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
+                    .type(named("java.util.concurrent.ScheduledThreadPoolExecutor"))
+                    .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
+                            builder
+                                    .visit(Advice.to(ExecutorTraceAdvice.WrapRunnable.class)
+                                            .on(named("schedule").and(takesArgument(0, Runnable.class))
+                                                    .or(named("scheduleAtFixedRate"))
+                                                    .or(named("scheduleWithFixedDelay"))))
+                                    .visit(Advice.to(ExecutorTraceAdvice.WrapCallable.class)
+                                            .on(named("schedule").and(takesArgument(0, Callable.class)))))
+                    .installOn(inst);
+            log("executor instrumentation installed (ThreadPoolExecutor, ScheduledThreadPoolExecutor)");
+        } catch (Throwable t) {
+            log("executor instrumentation failed (continuing without it): " + t);
+        }
+    }
+
     private static AsmVisitorWrapper selectMethodAdvice(TraceLensConfig config) {
         boolean methods = config.isTrackMethods();
         boolean exceptions = config.isTrackExceptions();
@@ -186,6 +288,22 @@ public final class TraceLensAgent {
         }
     }
 
+    /** Debug aid: -Dtracelens.dumpDir=/path dumps every woven class's bytes there. */
+    private static void dumpClass(TypeDescription typeDescription, DynamicType dynamicType) {
+        String dumpDir = System.getProperty("tracelens.dumpDir");
+        if (dumpDir == null) {
+            return;
+        }
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of(dumpDir);
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Files.write(dir.resolve(typeDescription.getSimpleName() + ".class"),
+                    dynamicType.getBytes());
+        } catch (Exception e) {
+            log("dump failed for " + typeDescription.getName() + ": " + e);
+        }
+    }
+
     private static void printSummary() {
         log("---- shutdown summary ----");
         log("instrumented classes: " + INSTRUMENTED_CLASSES.get());
@@ -193,6 +311,7 @@ public final class TraceLensAgent {
         log("events emitted:       " + TraceRuntime.emittedCount());
         log("dropped (no sink):    " + TraceRuntime.droppedNoSinkCount());
         log("dropped (no trace):   " + TraceRuntime.droppedNoTraceCount());
+        log("wrapped tasks:        " + TraceRuntime.wrappedTaskCount());
     }
 
     private static void log(String message) {

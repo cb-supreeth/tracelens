@@ -15,6 +15,7 @@ import static net.bytebuddy.matcher.ElementMatchers.isBridge;
 import static net.bytebuddy.matcher.ElementMatchers.isMethod;
 import static net.bytebuddy.matcher.ElementMatchers.isNative;
 import static net.bytebuddy.matcher.ElementMatchers.isSynthetic;
+import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 import static net.bytebuddy.matcher.ElementMatchers.not;
 
 /**
@@ -29,9 +30,16 @@ import static net.bytebuddy.matcher.ElementMatchers.not;
  */
 final class LineEmittingVisitor {
 
+    /**
+     * Instrumentable methods: concrete, non-bridge. Synthetic methods are excluded
+     * EXCEPT lambda bodies (lambda$...) — lambdas are where modern Java business logic
+     * lives (cb-ems controllers return Callable lambdas), and excluding them would
+     * blind the tracer exactly where it matters.
+     */
     static final ElementMatcher.Junction<MethodDescription> INSTRUMENTABLE_METHOD =
             isMethod().and(not(isAbstract())).and(not(isNative()))
-                    .and(not(isSynthetic())).and(not(isBridge()));
+                    .and(not(isBridge()))
+                    .and(not(isSynthetic()).or(nameStartsWith("lambda$")));
 
     static AsmVisitorWrapper.ForDeclaredMethods forMethods() {
         return new AsmVisitorWrapper.ForDeclaredMethods()

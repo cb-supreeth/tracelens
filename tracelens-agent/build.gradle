@@ -15,6 +15,22 @@ dependencies {
         exclude group: 'com.chargebee', module: 'tracelens-bridge'
     }
     compileOnly project(':tracelens-bridge')
+
+    testImplementation project(':tracelens-bridge')
+    testImplementation 'net.bytebuddy:byte-buddy-agent:1.15.11'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.assertj:assertj-core:3.25.3'
+    testImplementation 'org.junit.platform:junit-platform-launcher:1.10.2'
+}
+
+test {
+    useJUnitPlatform()
+    // One JVM per test class: agent tests mutate JVM-global state (woven JDK classes,
+    // bootstrap-injected bridge with static counters). Forking per class keeps them
+    // hermetic — e.g. ExecutorWeavingTest injects the bridge into bootstrap, which
+    // must not leak into other test classes' classloader view.
+    forkEvery = 1
+    dependsOn ':tracelens-bridge:compileJava'
 }
 
 def bridgeJarTask = project(':tracelens-bridge').tasks.named('jar', Jar)

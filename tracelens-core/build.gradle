@@ -3,6 +3,7 @@
 // survives the Spring Boot -> cb-framework migration unchanged.
 plugins {
     id 'java-library'
+    id 'maven-publish'
 }
 
 dependencies {
@@ -24,4 +25,12 @@ dependencies {
 
 test {
     useJUnitPlatform()
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
 }
