@@ -1,0 +1,2 @@
+[console_scripts]
+tracelens = tracelens_cli.cli:main
