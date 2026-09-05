@@ -76,6 +76,9 @@ public final class TraceLensConfig {
     /** Synthetic traces for @Scheduled jobs. */
     private boolean instrumentScheduled = true;
 
+    /** Class names whose method entries become EXTERNAL_CALL events (client wrappers). */
+    private List<String> externalCallClasses = new ArrayList<>();
+
     /**
      * FlowLens requires both labels before registering a flow (protects capacity on
      * shared envs). Locally we default to auto-minting labels for unlabelled traffic.
@@ -264,6 +267,15 @@ public final class TraceLensConfig {
 
     public TraceLensConfig setInstrumentScheduled(boolean instrumentScheduled) {
         this.instrumentScheduled = instrumentScheduled;
+        return this;
+    }
+
+    public List<String> getExternalCallClasses() {
+        return externalCallClasses;
+    }
+
+    public TraceLensConfig setExternalCallClasses(List<String> externalCallClasses) {
+        this.externalCallClasses = externalCallClasses;
         return this;
     }
 

@@ -98,12 +98,17 @@ public final class TraceLensFilter implements Filter {
         Tracer.ActiveTrace trace = maybeTrace.get();
         req.setAttribute(TRACE_ID_ATTRIBUTE, trace.segmentId());
         res.setHeader(TRACE_ID_HEADER, trace.segmentId());
+        // Datadog: tag the dd-agent's server span + capture its trace id (no-op without it)
+        DatadogCorrelation.correlate(lensId, user, trace.traceId(), trace.trace());
         try {
             chain.doFilter(request, response);
         } catch (Throwable t) {
             trace.trace().putAttribute("filterException", t.getClass().getName());
             throw t;
         } finally {
+            // post-dispatch (initial): cb-ms security context is populated by now —
+            // stamp siteId/siteType/requestId when available
+            CbMsContextContributor.contribute(trace.trace());
             if (req.isAsyncStarted()) {
                 // Callable-style MVC async: complete the trace when the async cycle ends.
                 Tracer.ActiveTrace toComplete = trace;

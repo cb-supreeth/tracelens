@@ -26,6 +26,14 @@ public final class TraceRuntime {
         void onMethodExit(String segmentId, String fqcn, String method);
 
         void onException(String segmentId, String fqcn, String method, String exceptionType, String message);
+
+        /** The routing datasource picked a pool (live/test x master/slave x RLS). */
+        default void onDbRoute(String segmentId, String routeKey) {
+        }
+
+        /** A call left the process (ClickHouse, DynamoDB, ...). system + short detail. */
+        default void onExternalCall(String segmentId, String system, String detail) {
+        }
     }
 
     /**
@@ -112,6 +120,38 @@ public final class TraceRuntime {
             return;
         }
         s.onException(segmentId, fqcn, method, exceptionType, message);
+        EMITTED.incrementAndGet();
+    }
+
+    /** DB_ROUTE event from the RoutingDataSource advice. */
+    public static void onDbRoute(String routeKey) {
+        Sink s = sink;
+        if (s == null) {
+            DROPPED_NO_SINK.incrementAndGet();
+            return;
+        }
+        String segmentId = TraceContext.currentSegmentId();
+        if (segmentId == null) {
+            DROPPED_NO_TRACE.incrementAndGet();
+            return;
+        }
+        s.onDbRoute(segmentId, routeKey);
+        EMITTED.incrementAndGet();
+    }
+
+    /** EXTERNAL_CALL event from external-system wrapper advice. */
+    public static void onExternalCall(String system, String detail) {
+        Sink s = sink;
+        if (s == null) {
+            DROPPED_NO_SINK.incrementAndGet();
+            return;
+        }
+        String segmentId = TraceContext.currentSegmentId();
+        if (segmentId == null) {
+            DROPPED_NO_TRACE.incrementAndGet();
+            return;
+        }
+        s.onExternalCall(segmentId, system, detail);
         EMITTED.incrementAndGet();
     }
 

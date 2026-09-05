@@ -24,6 +24,7 @@ import java.util.jar.JarFile;
 import static net.bytebuddy.matcher.ElementMatchers.hasSuperType;
 import static net.bytebuddy.matcher.ElementMatchers.isAbstract;
 import static net.bytebuddy.matcher.ElementMatchers.isAnnotatedWith;
+import static net.bytebuddy.matcher.ElementMatchers.isDeclaredBy;
 import static net.bytebuddy.matcher.ElementMatchers.isDefaultFinalizer;
 import static net.bytebuddy.matcher.ElementMatchers.isInterface;
 import static net.bytebuddy.matcher.ElementMatchers.isSynthetic;
@@ -85,6 +86,21 @@ public final class TraceLensAgent {
                 out = out.visit(Advice.to(ScheduledJobAdvice.class)
                         .on(isAnnotatedWith(named("org.springframework.scheduling.annotation.Scheduled"))
                                 .and(LineEmittingVisitor.INSTRUMENTABLE_METHOD)));
+            }
+            // DB_ROUTE events from any Spring routing datasource in scope (EMS's
+            // RoutingDataSource -> live/test x master/slave x RLS visibility)
+            out = out.visit(Advice.to(DbRouteAdvice.class)
+                    .on(named("determineCurrentLookupKey")
+                            .and(isDeclaredBy(hasSuperType(named(
+                                    "org.springframework.jdbc.datasource.lookup.AbstractRoutingDataSource"))))));
+            // EXTERNAL_CALL events for configured client-wrapper classes
+            if (!config.getExternalCallClasses().isEmpty()) {
+                ElementMatcher.Junction<TypeDescription> externalTypes = none();
+                for (String className : config.getExternalCallClasses()) {
+                    externalTypes = externalTypes.or(named(className));
+                }
+                out = out.visit(Advice.to(ExternalCallAdvice.class)
+                        .on(LineEmittingVisitor.INSTRUMENTABLE_METHOD.and(isDeclaredBy(externalTypes))));
             }
             return out;
         };

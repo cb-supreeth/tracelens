@@ -50,6 +50,12 @@ def render(trace: dict[str, Any],
         header += " [TRUNCATED]"
     out.append(header)
     out.append("─" * min(len(header) + 20, 120))
+    if attrs.get("siteId") or attrs.get("siteType"):
+        out.append(f"site: {attrs.get('siteId', '?')} ({attrs.get('siteType', '?')})"
+                   + (f"  requestId={attrs['requestId']}" if attrs.get("requestId") else ""))
+    if attrs.get("datadogTraceId"):
+        out.append(f"datadog: trace_id={attrs['datadogTraceId']} "
+                   f"(queryable via the Datadog MCP / UI; spans tagged tracelens.id=\"{trace.get('lensId')}\")")
 
     depth = 0
     last_thread: str | None = None
