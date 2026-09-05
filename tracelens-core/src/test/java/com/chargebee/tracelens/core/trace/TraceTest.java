@@ -1,0 +1,81 @@
+package com.chargebee.tracelens.core.trace;
+
+import com.chargebee.tracelens.core.event.EventType;
+import com.chargebee.tracelens.core.event.TraceEvent;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class TraceTest {
+
+    private Trace newTrace(int maxEvents) {
+        return new Trace("trace-1", "my-lens", "me@chargebee.com", EntryChannel.HTTP,
+                1_000L, 5_000L, maxEvents);
+    }
+
+    private TraceEvent lineEvent(String fqcn, int line) {
+        return TraceEvent.line(0, 2_000L, 100L, "test-thread", fqcn, line);
+    }
+
+    @Test
+    void assignsSequentialSeqNumbersOnAppend() {
+        Trace trace = newTrace(10);
+        trace.addEvent(lineEvent("com.example.Foo", 10));
+        trace.addEvent(lineEvent("com.example.Foo", 11));
+        trace.addEvent(lineEvent("com.example.Bar", 3));
+
+        assertThat(trace.events()).extracting(TraceEvent::getSeq).containsExactly(1L, 2L, 3L);
+        assertThat(trace.events()).extracting(TraceEvent::getClassName)
+                .containsExactly("com.example.Foo", "com.example.Foo", "com.example.Bar");
+        assertThat(trace.events()).extracting(TraceEvent::getLine).containsExactly(10, 11, 3);
+    }
+
+    @Test
+    void truncatesAtPerTraceCap() {
+        Trace trace = newTrace(3);
+        assertThat(trace.addEvent(lineEvent("A", 1))).isTrue();
+        assertThat(trace.addEvent(lineEvent("A", 2))).isTrue();
+        assertThat(trace.addEvent(lineEvent("A", 3))).isTrue();
+        assertThat(trace.addEvent(lineEvent("A", 4))).isFalse();
+        assertThat(trace.addEvent(lineEvent("A", 5))).isFalse();
+
+        assertThat(trace.eventCount()).isEqualTo(3);
+        assertThat(trace.isTruncated()).isTrue();
+    }
+
+    @Test
+    void completeSetsStatusAndDuration() {
+        Trace trace = newTrace(10);
+        assertThat(trace.getStatus()).isEqualTo(TraceStatus.ACTIVE);
+        assertThat(trace.durationMillis()).isNull();
+
+        trace.complete(1_450L);
+
+        assertThat(trace.getStatus()).isEqualTo(TraceStatus.COMPLETED);
+        assertThat(trace.durationMillis()).isEqualTo(450L);
+    }
+
+    @Test
+    void preservesEventAttributesThroughReordering() {
+        Trace trace = newTrace(10);
+        trace.addEvent(TraceEvent.builder(EventType.EXCEPTION)
+                .thread("t").className("com.example.Foo").methodName("bar")
+                .message("boom").attr("exceptionType", "IllegalStateException")
+                .build());
+
+        TraceEvent stored = trace.events().get(0);
+        assertThat(stored.getSeq()).isEqualTo(1L);
+        assertThat(stored.getAttributes()).containsEntry("exceptionType", "IllegalStateException");
+        assertThat(stored.getMessage()).isEqualTo("boom");
+    }
+
+    @Test
+    void tracksLastActivity() {
+        Trace trace = newTrace(10);
+        trace.addEvent(lineEvent("A", 1));
+        assertThat(trace.getLastActivityMillis()).isEqualTo(2_000L);
+        trace.touch(9_999L, 123L);
+        assertThat(trace.getLastActivityMillis()).isEqualTo(9_999L);
+        assertThat(trace.getLastActivityNanos()).isEqualTo(123L);
+    }
+}
