@@ -18,3 +18,6 @@ tracelens = "tracelens_cli.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["tracelens_cli*"]
+
+[tool.setuptools.package-data]
+tracelens_cli = ["web/*"]

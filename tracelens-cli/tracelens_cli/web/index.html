@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TraceLens</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">Trace<span>Lens</span></div>
+    <div id="status" class="status">connecting…</div>
+    <div class="spacer"></div>
+    <input id="filter" type="search" placeholder="filter by lens id / user…">
+    <label class="autorefresh"><input id="autorefresh" type="checkbox" checked> live</label>
+    <button id="reset" title="clear all retained traces">reset</button>
+  </header>
+
+  <main>
+    <section id="list-view">
+      <table id="traces">
+        <thead>
+          <tr>
+            <th>lens id</th><th>user</th><th>channel</th><th>status</th>
+            <th>events</th><th>size</th><th>started</th><th>last activity</th>
+          </tr>
+        </thead>
+        <tbody id="trace-rows"></tbody>
+      </table>
+      <div id="empty" class="empty hidden">
+        no traces retained — label a request with
+        <code>tracelens-id</code> + <code>tracelens-user</code> headers, or just hit the service
+      </div>
+    </section>
+
+    <section id="detail-view" class="hidden">
+      <div class="detail-head">
+        <button id="back">← back</button>
+        <div id="trace-meta"></div>
+      </div>
+      <div id="timeline" class="timeline"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

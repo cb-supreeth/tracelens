@@ -47,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     p_tail = sub.add_parser("tail", help="watch for new traces")
     p_tail.add_argument("--interval", type=float, default=2.0)
 
+    p_serve = sub.add_parser("serve", help="local web UI (bridge on 127.0.0.1)")
+    p_serve.add_argument("--port", type=int, default=7777)
+    p_serve.add_argument("--source-root", default=None,
+                         help="local checkout for source lines (default: ~/work/cb-ems)")
+
     p_reset = sub.add_parser("reset", help="clear retained traces")
     p_reset.add_argument("trace_id", nargs="?")
 
@@ -82,6 +87,9 @@ def _dispatch(args, client: TraceLensClient) -> int:
         _print_traces(client.find_by_lens_id(args.lens_id))
     elif cmd == "tail":
         return _tail(client, args.interval)
+    elif cmd == "serve":
+        from . import server
+        return server.serve(args.port, args.url, args.source_root)
     elif cmd == "reset":
         _print_json(client.reset(args.trace_id))
     elif cmd == "enable":
