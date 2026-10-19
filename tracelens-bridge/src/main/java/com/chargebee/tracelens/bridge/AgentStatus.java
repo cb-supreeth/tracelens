@@ -8,8 +8,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * What the agent reports about itself, readable by the app (debug API) via the
- * bootstrap. Powers the FlowLens-style verification sequence: "summary shows non-zero
- * instrumented-class count" proves the agent is alive and scoped correctly.
+ * bootstrap. Counts describe the main application transformer, not every HTTP or
+ * messaging hook. Verify intended coverage with actual captured work as well.
  */
 public final class AgentStatus {
 
@@ -25,7 +25,7 @@ public final class AgentStatus {
     private AgentStatus() {
     }
 
-    /** Called by the agent for every successfully transformed class (boot-time only). */
+    /** Called by the main application transformer for each successful transformation. */
     public static void noteInstrumentedClass(String fqcn) {
         INSTRUMENTED.incrementAndGet();
         if (NAMES.size() < MAX_RETAINED_NAMES) {
@@ -62,7 +62,7 @@ public final class AgentStatus {
         return premainMillis;
     }
 
-    /** True when the agent is attached and has woven at least one class. */
+    /** True after premain completion was reported; zero application classes is possible. */
     public static boolean agentActive() {
         return premainMillis >= 0;
     }

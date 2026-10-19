@@ -9,6 +9,11 @@ plugins {
     id 'maven-publish'
 }
 
+// Shared with Java 8 applications through the agent's bootstrap classloader.
+tasks.named('compileJava', JavaCompile) {
+    options.release = 8
+}
+
 dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.assertj:assertj-core:3.25.3'

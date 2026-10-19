@@ -12,5 +12,8 @@
   "trackMethods": true,
   "trackExceptions": true,
   "requireLabels": false,
+  "distributedTracingEnabled": true,
+  "httpClientCaptureEnabled": true,
+  "httpPropagationAllowedDestinations": [],
   "contextParams": { "jvmArgs": ["aws.profile.name"] }
 }

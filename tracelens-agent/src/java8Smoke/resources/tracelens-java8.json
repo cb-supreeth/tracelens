@@ -1,0 +1,9 @@
+{
+  "applicationId": "cb-app-java8-smoke",
+  "applicationVersion": "LOCAL",
+  "packages": ["com.chargebee.cbappfixture"],
+  "evictOnExport": false,
+  "instrumentExecutors": true,
+  "instrumentMessaging": false,
+  "instrumentScheduled": false
+}

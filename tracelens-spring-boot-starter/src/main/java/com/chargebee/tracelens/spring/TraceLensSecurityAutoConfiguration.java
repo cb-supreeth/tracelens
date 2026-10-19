@@ -2,6 +2,7 @@ package com.chargebee.tracelens.spring;
 
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
@@ -20,6 +21,7 @@ import org.springframework.security.config.annotation.web.configuration.WebSecur
  */
 @AutoConfiguration
 @ConditionalOnProperty(prefix = "tracelens", name = "enabled", havingValue = "true")
+@ConditionalOnExpression("!${tracelens.standalone:false}")
 @ConditionalOnClass(WebSecurityCustomizer.class)
 public class TraceLensSecurityAutoConfiguration {
 

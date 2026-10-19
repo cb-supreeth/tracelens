@@ -41,6 +41,8 @@ public final class TraceLensFilter implements Filter {
 
     /** Response header echoing the trace id. */
     static final String TRACE_ID_HEADER = "X-TraceLens-Id";
+    static final String ACTION_ID_HEADER = "X-TraceLens-Action-Id";
+    static final String ACTION_NAME_HEADER = "X-TraceLens-Action-Name";
 
     private final Tracer tracer;
     private final TraceStore store;
@@ -79,7 +81,9 @@ public final class TraceLensFilter implements Filter {
             lensId = "auto:" + req.getMethod() + " " + path;
         }
         if (user == null) {
-            user = "anonymous";
+            // The filter is registered after Spring Security, so cb-ms's request
+            // principal is available here. Explicit tracelens-user headers win.
+            user = CbMsContextContributor.resolvedUser("anonymous");
         }
 
         Map<String, String> attributes = new LinkedHashMap<>();
@@ -88,6 +92,9 @@ public final class TraceLensFilter implements Filter {
         if (req.getQueryString() != null) {
             attributes.put("query", req.getQueryString());
         }
+        copyActionHeader(req, attributes, TraceSnapshot.ACTION_ID_KEY, "actionId");
+        copyActionHeader(req, attributes, TraceSnapshot.ACTION_NAME_KEY, "actionName");
+        copyActionHeader(req, attributes, TraceSnapshot.SESSION_ID_KEY, "sessionId");
 
         Optional<Tracer.ActiveTrace> maybeTrace = tracer.begin(lensId, user, EntryChannel.HTTP, attributes);
         if (maybeTrace.isEmpty()) {
@@ -98,6 +105,15 @@ public final class TraceLensFilter implements Filter {
         Tracer.ActiveTrace trace = maybeTrace.get();
         req.setAttribute(TRACE_ID_ATTRIBUTE, trace.segmentId());
         res.setHeader(TRACE_ID_HEADER, trace.segmentId());
+        if (attributes.containsKey("actionId")) {
+            res.setHeader(ACTION_ID_HEADER, attributes.get("actionId"));
+        }
+        if (attributes.containsKey("actionName")) {
+            res.setHeader(ACTION_NAME_HEADER, attributes.get("actionName"));
+        }
+        // Capture Chargebee request context while the security context is live;
+        // it is cleared by Spring Security before this filter's finally block.
+        CbMsContextContributor.contribute(trace.trace());
         // Datadog: tag the dd-agent's server span + capture its trace id (no-op without it)
         DatadogCorrelation.correlate(lensId, user, trace.traceId(), trace.trace());
         try {
@@ -106,9 +122,6 @@ public final class TraceLensFilter implements Filter {
             trace.trace().putAttribute("filterException", t.getClass().getName());
             throw t;
         } finally {
-            // post-dispatch (initial): cb-ms security context is populated by now —
-            // stamp siteId/siteType/requestId when available
-            CbMsContextContributor.contribute(trace.trace());
             if (req.isAsyncStarted()) {
                 // Callable-style MVC async: complete the trace when the async cycle ends.
                 Tracer.ActiveTrace toComplete = trace;
@@ -158,5 +171,14 @@ public final class TraceLensFilter implements Filter {
             }
         }
         return false;
+    }
+
+    private static void copyActionHeader(HttpServletRequest request, Map<String, String> attributes,
+                                         String header, String attribute) {
+        String value = request.getHeader(header);
+        if (value != null && !value.isBlank()) {
+            // Bound untrusted header values before retaining them with every line event.
+            attributes.put(attribute, value.trim().substring(0, Math.min(value.trim().length(), 160)));
+        }
     }
 }

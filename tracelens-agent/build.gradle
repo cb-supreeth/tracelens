@@ -3,12 +3,17 @@ plugins {
     id 'com.gradleup.shadow' version '8.3.5'
 }
 
+// premain and woven advice must load in legacy Java 8 applications as well.
+tasks.named('compileJava', JavaCompile) {
+    options.release = 8
+}
+
 dependencies {
     // Same ByteBuddy cb-ems uses (Java 21 compatible). Shaded + relocated below so the
     // agent never clashes with the app's own ByteBuddy (Hibernate) on the classpath.
     implementation 'net.bytebuddy:byte-buddy:1.15.11'
 
-    // Core is shaded in (relocated) for tracelens.json parsing at premain. The bridge
+    // Core is shaded in (relocated) for config and the standalone store/API. The bridge
     // is EXCLUDED — it must exist exactly once, in the bootstrap loader (injected at
     // premain), or we get loader-constraint LinkageErrors.
     implementation(project(':tracelens-core')) {
@@ -37,8 +42,8 @@ def bridgeJarTask = project(':tracelens-bridge').tasks.named('jar', Jar)
 
 // The ONLY valid agent artifact is the shaded fat jar (FlowLens lesson: the thin jar
 // fails silently as a javaagent). We attach the 'agent' classifier to make that explicit:
-//   tracelens-agent-0.1.0-SNAPSHOT-agent.jar  <- use this one
-//   tracelens-agent-0.1.0-SNAPSHOT.jar        <- thin jar, library use only, never a javaagent
+//   tracelens-agent-0.1.1-SNAPSHOT-agent.jar  <- use this one
+//   tracelens-agent-0.1.1-SNAPSHOT.jar        <- thin jar, library use only, never a javaagent
 shadowJar {
     archiveClassifier.set('agent')
     mergeServiceFiles()
@@ -47,8 +52,8 @@ shadowJar {
     // copying it (Shadow treats archive sources as zip trees). Embedding happens in
     // processResources below instead — plain Copy semantics, jar copied as a file.
 
-    // Relocate everything third-party (and core — the agent only uses it to parse
-    // config at premain) so the agent is self-contained and clash-free. The bridge is
+    // Relocate everything third-party and core so the agent is self-contained and
+    // isolated from application dependencies. The bridge is
     // deliberately NOT shaded or relocated: woven bytecode references it by name.
     relocate 'net.bytebuddy', 'com.chargebee.tracelens.shaded.bytebuddy'
     relocate 'com.fasterxml.jackson', 'com.chargebee.tracelens.shaded.jackson'
@@ -78,3 +83,33 @@ processResources {
 }
 
 build.dependsOn shadowJar
+
+// Run explicitly with :tracelens-agent:java8Smoke on machines with a Java 8 JDK.
+// Regular unit tests stay on Java 21; this exercises the delivered shaded jar and
+// bootstrap bridge in a real Java 8 VM (including executor retransformation).
+sourceSets {
+    java8Smoke
+}
+
+dependencies {
+    java8SmokeImplementation project(':tracelens-core')
+}
+
+tasks.named('compileJava8SmokeJava', JavaCompile) {
+    options.release = 8
+}
+
+tasks.register('java8Smoke', JavaExec) {
+    group = 'verification'
+    description = 'Smoke-test the shaded agent and core in an installed Java 8 JVM.'
+    dependsOn shadowJar, java8SmokeClasses
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(8)
+    }
+    classpath = sourceSets.java8Smoke.runtimeClasspath
+    mainClass = 'com.chargebee.tracelens.compat.Java8AgentSmoke'
+    doFirst {
+        jvmArgs "-javaagent:${tasks.shadowJar.archiveFile.get().asFile.absolutePath}",
+                "-Dtracelens.configPath=${file('src/java8Smoke/resources/tracelens-java8.json').absolutePath}"
+    }
+}

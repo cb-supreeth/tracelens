@@ -1,0 +1,83 @@
+/* Scoped so the same diagram can be embedded in the viewer and MCP Apps. */
+.tl-graph {
+  --tg-bg: #0d1117; --tg-panel: #161b22; --tg-raised: #1b2330;
+  --tg-fg: #e6edf3; --tg-dim: #8b949e; --tg-border: #303b4b;
+  --tg-blue: #58a6ff; --tg-blue-soft: #1b3049; --tg-amber: #e5b655;
+  --tg-amber-soft: #332b1b; --tg-red: #ff7b72; --tg-purple: #c5a5ff; --tg-purple-soft: #292137;
+  box-sizing: border-box; min-width: 0; width: 100%; color: var(--tg-fg);
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+[data-theme="light"] .tl-graph, [data-color-scheme="light"] .tl-graph,
+.tl-graph[data-theme="light"], .tl-graph[data-color-scheme="light"] {
+  --tg-bg: #f6f8fb; --tg-panel: #fff; --tg-raised: #edf3fb;
+  --tg-fg: #172338; --tg-dim: #58677c; --tg-border: #cbd5e3;
+  --tg-blue: #0863bf; --tg-blue-soft: #e7f1ff; --tg-amber: #8e5a08;
+  --tg-amber-soft: #fff5de; --tg-red: #b42318; --tg-purple: #6941a5; --tg-purple-soft: #f4edff;
+}
+.tl-graph *, .tl-graph *::before, .tl-graph *::after { box-sizing: border-box; }
+.tl-graph-toolbar { display: flex; align-items: start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.tl-graph-title { margin: 0; color: var(--tg-fg); font-size: 18px; font-weight: 650; }
+.tl-graph-subtitle { margin: 4px 0 0; color: var(--tg-dim); font-size: 12px; }
+.tl-graph-counts { color: var(--tg-dim); font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.tl-graph-legend { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; color: var(--tg-dim); margin: 14px 0 0; font-size: 11px; }
+.tl-graph-legend-segment::before, .tl-graph-legend-call::before, .tl-graph-legend-dependency::before {
+  content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 6px; border: 1px solid var(--tg-blue); border-radius: 2px; background: var(--tg-blue-soft);
+}
+.tl-graph-legend-call::before { border-color: var(--tg-amber); background: var(--tg-amber-soft); border-radius: 50%; }
+.tl-graph-legend-dependency::before { border-color: var(--tg-purple); background: var(--tg-purple-soft); }
+.tl-graph-legend-edge::before { content: "→"; color: var(--tg-blue); margin-right: 6px; }
+.tl-graph-notices { margin-top: 12px; padding: 8px 12px; border-left: 2px solid var(--tg-amber); background: var(--tg-amber-soft); border-radius: 0 4px 4px 0; }
+.tl-graph-notice { color: var(--tg-amber); font-size: 12px; margin: 3px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.tl-graph-error { color: var(--tg-red); }
+.tl-graph-help { color: var(--tg-dim); font-size: 11px; margin: 12px 0 8px; }
+.tl-graph-viewport { width: 100%; max-height: min(620px, 70vh); min-height: 220px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--tg-border); border-radius: 9px; background: var(--tg-bg); scrollbar-color: var(--tg-border) var(--tg-bg); }
+.tl-graph-canvas { position: relative; min-width: 100%; background-image: radial-gradient(var(--tg-border) .65px, transparent .65px); background-size: 18px 18px; isolation: isolate; }
+.tl-graph-connectors { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.tl-graph-edge { fill: none; stroke-width: 1.7; opacity: .85; }
+.tl-graph-edge.tl-graph-outbound { stroke: var(--tg-amber); }
+.tl-graph-edge.tl-graph-observed-call { stroke: var(--tg-blue); }
+.tl-graph-edge.tl-graph-inbound { stroke: var(--tg-purple); stroke-dasharray: 5 3; }
+.tl-graph-arrow.tl-graph-outbound { fill: var(--tg-amber); }
+.tl-graph-arrow.tl-graph-observed-call { fill: var(--tg-blue); }
+.tl-graph-arrow.tl-graph-inbound { fill: var(--tg-purple); }
+.tl-graph-cycle { stroke-dasharray: 5 4; }
+.tl-graph-node {
+  position: absolute; z-index: 1; display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 14px; border: 1px solid var(--tg-border); border-left: 3px solid var(--tg-blue);
+  border-radius: 7px; background: var(--tg-panel); color: var(--tg-fg); text-align: left;
+  cursor: pointer; font: inherit; overflow: hidden; box-shadow: 0 2px 7px #0002;
+}
+.tl-graph-node.tl-graph-http-call { border-left-color: var(--tg-amber); background: var(--tg-amber-soft); border-radius: 15px; }
+.tl-graph-node.tl-graph-dependency-call { border-left-color: var(--tg-purple); background: var(--tg-purple-soft); border-radius: 3px 15px 3px 15px; }
+.tl-graph-dependency-call .tl-graph-node-kind { color: var(--tg-purple); }
+.tl-graph-node:hover { border-color: var(--tg-blue); background: var(--tg-raised); }
+.tl-graph-node[aria-pressed="true"] { border-color: var(--tg-blue); box-shadow: 0 0 0 2px var(--tg-blue-soft); }
+.tl-graph-node.tl-graph-http-call:hover, .tl-graph-node.tl-graph-http-call[aria-pressed="true"] { border-color: var(--tg-amber); }
+.tl-graph-node:focus-visible, .tl-graph-source:focus-visible { outline: 2px solid var(--tg-blue); outline-offset: 3px; }
+.tl-graph-node-kind { color: var(--tg-blue); font: 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .7px; white-space: nowrap; }
+.tl-graph-http-call .tl-graph-node-kind { color: var(--tg-amber); }
+.tl-graph-node-name { font-size: 14px; line-height: 1.5; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-graph-node-api { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; min-height: 32px; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tl-graph-node-metrics, .tl-graph-node-context { font-size: 10px; color: var(--tg-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tl-graph-node-context { margin-top: auto; }
+.tl-graph-failed .tl-graph-node-metrics { color: var(--tg-red); }
+.tl-graph-details { margin-top: 14px; border: 1px solid var(--tg-border); border-radius: 8px; padding: 16px; background: var(--tg-panel); }
+.tl-graph-detail-title { color: var(--tg-fg); font-size: 14px; margin: 0; }
+.tl-graph-detail-api { color: var(--tg-blue); margin: 4px 0 12px; overflow-wrap: anywhere; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tl-graph-detail-list { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 5px 16px; margin: 0; font-size: 11px; }
+.tl-graph-detail-list dt { color: var(--tg-dim); }
+.tl-graph-detail-list dd { margin: 0; color: var(--tg-fg); overflow-wrap: anywhere; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tl-graph-source { margin-top: 14px; border: 1px solid var(--tg-blue); border-radius: 5px; color: var(--tg-blue); background: var(--tg-blue-soft); padding: 7px 12px; font: inherit; cursor: pointer; }
+.tl-graph-source:hover { filter: brightness(1.08); }
+.tl-graph-empty { padding: 36px 16px; text-align: center; border: 1px dashed var(--tg-border); border-radius: 8px; color: var(--tg-dim); background: var(--tg-bg); }
+@media (max-width: 520px) {
+  .tl-graph-detail-list { grid-template-columns: 1fr; gap: 2px; }
+  .tl-graph-detail-list dd { margin-bottom: 7px; }
+  .tl-graph-toolbar { gap: 6px; }
+  .tl-graph-legend { gap: 7px 12px; }
+}
+@media (forced-colors: active) {
+  .tl-graph-node[aria-pressed="true"] { outline: 2px solid Highlight; }
+  .tl-graph-edge { stroke: CanvasText !important; }
+  .tl-graph-arrow { fill: CanvasText !important; }
+}

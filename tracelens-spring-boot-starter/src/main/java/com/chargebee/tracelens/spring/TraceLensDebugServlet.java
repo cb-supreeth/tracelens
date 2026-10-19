@@ -54,7 +54,7 @@ public final class TraceLensDebugServlet extends HttpServlet {
         } else if (path.equals("/traces")) {
             writeJson(resp, traces(store.summaries()));
         } else if (path.startsWith("/export/")) {
-            export(path.substring("/export/".length()), resp);
+            export(path.substring("/export/".length()), req, resp);
         } else if (path.startsWith("/find-by-lens-id/")) {
             findByLensId(path.substring("/find-by-lens-id/".length()), resp);
         } else if (path.equals("/metadata")) {
@@ -132,8 +132,10 @@ public final class TraceLensDebugServlet extends HttpServlet {
         return node;
     }
 
-    private void export(String traceId, HttpServletResponse resp) throws IOException {
-        Optional<Trace> trace = store.export(traceId);
+    private void export(String traceId, HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        // ?evict=false -> inspect without removing (MCP/CLI reads; keeps the UI's copy)
+        Boolean evictOverride = "false".equalsIgnoreCase(req.getParameter("evict")) ? Boolean.FALSE : null;
+        Optional<Trace> trace = store.export(traceId, evictOverride);
         if (trace.isEmpty()) {
             notFound(resp, "no such trace: " + traceId);
             return;

@@ -32,13 +32,19 @@ public final class Trace {
     private final String segmentId;
     private final String parentSegmentId;
     private final String lensId;
-    private final String user;
+    /**
+     * Usually supplied at trace entry. HTTP traces may replace the auto-generated
+     * local value after the security filter resolves the authenticated principal.
+     */
+    private volatile String user;
     private final EntryChannel entryChannel;
     private final long startedAtMillis;
     private final long startNanos;
     private final int maxEventsPerTrace;
 
     private final List<TraceEvent> events = new ArrayList<>(256);
+    private final Map<String, Map<String, String>> httpCalls = new java.util.LinkedHashMap<>();
+    private volatile boolean httpCallsTruncated;
     private final AtomicLong seq = new AtomicLong();
     private final Map<String, String> attributes = new ConcurrentHashMap<>();
 
@@ -125,6 +131,34 @@ public final class Trace {
         }
     }
 
+    /** Bounded upsert: client calls are metadata, not unbounded additional line events. */
+    public void recordHttpCall(Map<String, String> call) {
+        if (call == null || call.get("spanId") == null) return;
+        synchronized (httpCalls) {
+            String key = call.get("spanId");
+            if (!httpCalls.containsKey(key) && httpCalls.size() >= 64) {
+                httpCallsTruncated = true;
+                return;
+            }
+            Map<String, String> bounded = new java.util.LinkedHashMap<>();
+            for (Map.Entry<String, String> entry : call.entrySet()) {
+                if (bounded.size() >= 24) break;
+                String value = entry.getValue();
+                if (entry.getKey() != null && entry.getKey().length() <= 64 && value != null) {
+                    bounded.put(entry.getKey(), value.substring(0, Math.min(value.length(), 512)));
+                }
+            }
+            httpCalls.put(key, Collections.unmodifiableMap(bounded));
+        }
+        touch(System.currentTimeMillis(), System.nanoTime());
+    }
+
+    public List<Map<String, String>> httpCalls() {
+        synchronized (httpCalls) { return new ArrayList<>(httpCalls.values()); }
+    }
+
+    public boolean isHttpCallsTruncated() { return httpCallsTruncated; }
+
     public void complete(long endedAtMillis) {
         if (status == TraceStatus.ACTIVE) {
             this.endedAtMillis = endedAtMillis;
@@ -165,6 +199,17 @@ public final class Trace {
 
     public String getUser() {
         return user;
+    }
+
+    /**
+     * Refines a display identity discovered after trace creation (for example,
+     * cb-ms authentication runs after TraceLens's early servlet filter). This is
+     * metadata only; it never changes trace routing or propagation identity.
+     */
+    public void setUser(String user) {
+        if (user != null && !user.trim().isEmpty()) {
+            this.user = user;
+        }
     }
 
     public EntryChannel getEntryChannel() {
@@ -210,7 +255,7 @@ public final class Trace {
 
     /** Rough heap estimate for the summary endpoint (~120B per event + overhead). */
     public long approxSizeBytes() {
-        return 2_000L + eventCount() * 120L;
+        synchronized (httpCalls) { return 2_000L + eventCount() * 120L + httpCalls.size() * 2_000L; }
     }
 
     @Override

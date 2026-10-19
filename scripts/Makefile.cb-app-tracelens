@@ -1,0 +1,77 @@
+# Copy to chargebee-app/Makefile.tracelens; run from that repository root.
+# Optional launcher for an already configured local cb-app checkout.
+# Keeps the normal lifecycle in Makefile/service-orchestrator unchanged.
+# Lifecycle/repository name: chargebee-app. TraceLens identity in JSON: cb-app.
+#   make -f Makefile.tracelens up
+#   make -f Makefile.tracelens restart   # existing built app; clears Tomcat logs
+#   make -f Makefile.tracelens status
+#
+# Prerequisites: build the TraceLens shaded agent and source its cb-app-setenv.sh
+# from tomcat/bin/setenv.sh. See the TraceLens docs/cb-app-integration.md guide.
+# Override TRACELENS_HOME if the checkouts are not siblings; use absolute paths.
+
+.DEFAULT_GOAL := up
+
+export TRACELENS_HOME ?= $(abspath ../cb-tracelens)
+export TRACELENS_VERSION ?= 0.1.1-SNAPSHOT
+export TRACELENS_CONFIG ?= $(TRACELENS_HOME)/scripts/cb-app-tracelens.json
+export TRACELENS_HTTP_PATHS ?= /api/v2/features
+export TRACELENS_PORT ?= 7778
+
+.PHONY: up restart check status help
+
+up: check
+	@echo "Starting the normal cb-app lifecycle with TraceLens enabled."
+	@echo "An already-healthy JVM is reused: use make -f Makefile.tracelens restart to attach TraceLens to it."
+	@$(MAKE) -f Makefile up TRACELENS=1
+
+# Main Makefile's start hook uses service-orchestrator tomcat-start: it selects
+# the configured JDK, restarts Tomcat with jobs start and returns without tailing.
+# Unlike make up, this avoids the full build/fixture lifecycle.
+restart: check
+	@echo "Restarting the built cb-app with TraceLens. This clears existing Tomcat logs and enables jobs."
+	@$(MAKE) -f Makefile ensure-orchestrator
+	@$(MAKE) -f Makefile start TRACELENS=1
+
+check:
+	@set -eu; \
+	if [ ! -f Makefile ] || [ ! -d local-setup ]; then \
+		echo "Run this command from the chargebee-app repository root." >&2; exit 1; \
+	fi; \
+	for path in "$$TRACELENS_HOME" "$$TRACELENS_CONFIG"; do \
+		case "$$path" in /*) ;; *) echo "TRACELENS_HOME and TRACELENS_CONFIG must be absolute paths." >&2; exit 1;; esac; \
+	done; \
+	case "$$TRACELENS_PORT" in ''|*[!0-9]*|??????*) echo "TRACELENS_PORT must be 0 to 65535 (at most five digits)." >&2; exit 1;; esac; \
+	if [ ! -r "$$TRACELENS_HOME/scripts/cb-app-setenv.sh" ]; then \
+		echo "TraceLens helper not found. Set TRACELENS_HOME to your cb-tracelens checkout." >&2; exit 1; \
+	fi; \
+	if [ ! -r tomcat/bin/setenv.sh ] || \
+	   ! grep -Eq '^[[:space:]]*(\.|source)[[:space:]].*cb-app-setenv\.sh' tomcat/bin/setenv.sh; then \
+		echo "TraceLens is not wired into tomcat/bin/setenv.sh. Preserve its settings and add:" >&2; \
+		printf '. "%s/scripts/cb-app-setenv.sh" || exit 1\n' "$$TRACELENS_HOME" >&2; \
+		echo "For an unbuilt cb-app checkout, complete the normal make up first." >&2; exit 1; \
+	fi; \
+	TRACELENS=1; export TRACELENS; \
+	. "$$TRACELENS_HOME/scripts/cb-app-setenv.sh"; \
+	echo "TraceLens agent/config checks passed (debug port $$TRACELENS_PORT)."
+
+# Do not export the CATALINA_OPTS produced by check: it runs in a separate shell.
+# Tomcat's setenv.sh must attach the agent exactly once during the actual start.
+status:
+	@set -eu; \
+	case "$$TRACELENS_PORT" in ''|*[!0-9]*|??????*) echo "TRACELENS_PORT must be 1 to 65535 (at most five digits)." >&2; exit 1;; esac; \
+	if [ "$$TRACELENS_PORT" -eq 0 ] || [ "$$TRACELENS_PORT" -gt 65535 ]; then \
+		echo "status needs a known port from 1 to 65535; port 0 is printed in the startup logs." >&2; exit 1; \
+	fi; \
+	curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+		"http://127.0.0.1:$$TRACELENS_PORT/tracelens/summary"
+
+help:
+	@printf '%s\n' \
+		'make -f Makefile.tracelens up       Normal lifecycle, with TRACELENS=1; healthy JVMs are reused.' \
+		'make -f Makefile.tracelens restart  Restart built cb-app with tracing/jobs; clears Tomcat logs.' \
+		'make -f Makefile.tracelens check    Check wiring, agent, config and settings; no service changes.' \
+		'make -f Makefile.tracelens status   Read the agent summary (default port 7778).' \
+		'Overrides: TRACELENS_HOME, TRACELENS_VERSION, TRACELENS_CONFIG, TRACELENS_HTTP_PATHS, TRACELENS_PORT.' \
+		'TRACELENS_HOME and TRACELENS_CONFIG overrides must use absolute paths.' \
+		'Use normal make down to stop cb-app; this file does not start EMS or the TraceLens viewer.'

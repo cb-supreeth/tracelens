@@ -42,6 +42,10 @@ public final class TraceExporter {
         ObjectNode root = mapper.createObjectNode();
         root.put("traceId", trace.getTraceId());
         root.put("segmentId", trace.getSegmentId());
+        root.put("schemaVersion", 2);
+        putIfNotNull(root, "spanId", trace.getAttributes().get("spanId"));
+        putIfNotNull(root, "parentSpanId", trace.getAttributes().get("parentSpanId"));
+        putIfNotNull(root, "serviceInstanceId", trace.getAttributes().get("serviceInstanceId"));
         putIfNotNull(root, "parentSegmentId", trace.getParentSegmentId());
         putIfNotNull(root, "lensId", trace.getLensId());
         putIfNotNull(root, "user", trace.getUser());
@@ -57,6 +61,8 @@ public final class TraceExporter {
         }
         root.put("eventCount", trace.eventCount());
         root.put("truncated", trace.isTruncated());
+        root.put("httpCallsTruncated", trace.isHttpCallsTruncated());
+        root.set("httpCalls", mapper.valueToTree(trace.httpCalls()));
 
         ObjectNode attributes = root.putObject("attributes");
         trace.getAttributes().forEach(attributes::put);

@@ -1,0 +1,25 @@
+{
+  "applicationId": "standalone-smoke",
+  "applicationVersion": "LOCAL",
+  "packages": ["com.example.standalone"],
+  "evictOnExport": true,
+  "capturePayloads": false,
+  "instrumentExecutors": true,
+  "instrumentMessaging": false,
+  "instrumentScheduled": false,
+  "httpIdentityHooks": [
+    {
+      "id": "fixture-authentication",
+      "className": "com.example.authentication.AuthBoundary",
+      "methodName": "validate",
+      "parameterCount": 1,
+      "targetArgument": 0,
+      "requestPath": ["req"],
+      "userPath": ["getUser", "email"],
+      "sitePath": ["site", "id"],
+      "trustedUserHeader": "X-Fixture-Caller",
+      "trustedUserHeaderValues": ["middleware"],
+      "fallbackUser": "apicall"
+    }
+  ]
+}

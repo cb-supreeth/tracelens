@@ -61,6 +61,9 @@ class TraceLensStarterTest {
         HttpHeaders headers = new HttpHeaders();
         headers.add("tracelens-id", "starter-test-flow");
         headers.add("tracelens-user", "test@chargebee.com");
+        headers.add("tracelens-action-id", "action-123");
+        headers.add("tracelens-action-name", "update-user-licence");
+        headers.add("tracelens-session-id", "browser-session-1");
 
         ResponseEntity<String> hello = rest.exchange(url("/hello"), HttpMethod.GET,
                 new HttpEntity<>(headers), String.class);
@@ -68,6 +71,9 @@ class TraceLensStarterTest {
         assertThat(hello.getStatusCode().is2xxSuccessful()).isTrue();
         String traceId = hello.getHeaders().getFirst("X-TraceLens-Id");
         assertThat(traceId).isNotBlank();
+        assertThat(hello.getHeaders().getFirst("X-TraceLens-Action-Id")).isEqualTo("action-123");
+        assertThat(hello.getHeaders().getFirst("X-TraceLens-Action-Name"))
+                .isEqualTo("update-user-licence");
 
         String traces = rest.getForObject(url("/tracelens/traces"), String.class);
         assertThat(traces).contains("starter-test-flow").contains(traceId);
@@ -76,6 +82,9 @@ class TraceLensStarterTest {
         assertThat(exported)
                 .contains("\"lensId\" : \"starter-test-flow\"")
                 .contains("\"entryChannel\" : \"HTTP\"")
+                .contains("\"actionId\" : \"action-123\"")
+                .contains("\"actionName\" : \"update-user-licence\"")
+                .contains("\"sessionId\" : \"browser-session-1\"")
                 .contains("\"path\" : \"/hello\"")
                 .contains("\"httpStatus\" : \"200\"");
     }

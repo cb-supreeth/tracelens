@@ -20,13 +20,13 @@ import static net.bytebuddy.matcher.ElementMatchers.not;
 
 /**
  * Emits {@code TraceRuntime.onLine(fqcn, line)} at every line-number attribute of
- * every matched method. This is the core of line-level capture: javac records one
- * line-number entry per source line that produced bytecode, so hooking
- * {@link MethodVisitor#visitLineNumber} gives us exact executed-line events.
+ * every matched method. Compiled line-table entries are bytecode-to-source mappings,
+ * not necessarily one per source statement or source line. A callback proves that
+ * a marker was reached, not that every operation on that line completed. Without
+ * line debug metadata, {@link MethodVisitor#visitLineNumber} supplies no line events.
  *
- * Constructor hazard: the first line number of a constructor precedes the
- * super()/this() call, and the verifier rejects arbitrary calls before it. We
- * therefore suppress injection in <init> until the delegate constructor call is seen.
+ * The isMethod matcher excludes constructors and class initializers; this visitor
+ * is only installed for ordinary methods and eligible lambda bodies.
  */
 final class LineEmittingVisitor {
 
@@ -54,8 +54,7 @@ final class LineEmittingVisitor {
                                       TypePool typePool,
                                       int writerFlags,
                                       int readerFlags) {
-        return new LineEmittingMethodVisitor(methodVisitor, instrumentedType.getName(),
-                instrumentedMethod.isConstructor());
+        return new LineEmittingMethodVisitor(methodVisitor, instrumentedType.getName());
     }
 
     private static final class LineEmittingMethodVisitor extends MethodVisitor {
@@ -63,28 +62,15 @@ final class LineEmittingVisitor {
         private static final String RECORDER = "com/chargebee/tracelens/bridge/TraceRuntime";
 
         private final String fqcn;
-        private boolean injectionAllowed;
 
-        LineEmittingMethodVisitor(MethodVisitor mv, String fqcn, boolean constructor) {
+        LineEmittingMethodVisitor(MethodVisitor mv, String fqcn) {
             super(Opcodes.ASM9, mv);
             this.fqcn = fqcn;
-            this.injectionAllowed = !constructor;
-        }
-
-        @Override
-        public void visitMethodInsn(int opcode, String owner, String name, String descriptor, boolean isInterface) {
-            super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
-            if (!injectionAllowed && opcode == Opcodes.INVOKESPECIAL && "<init>".equals(name)) {
-                injectionAllowed = true;
-            }
         }
 
         @Override
         public void visitLineNumber(int line, Label start) {
             super.visitLineNumber(line, start);
-            if (!injectionAllowed) {
-                return;
-            }
             mv.visitLdcInsn(fqcn);
             mv.visitLdcInsn(line);
             mv.visitMethodInsn(Opcodes.INVOKESTATIC, RECORDER, "onLine", "(Ljava/lang/String;I)V", false);

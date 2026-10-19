@@ -10,8 +10,9 @@ import net.bytebuddy.asm.Advice;
  * "#t"/"#m" origins resolve to constant strings at weave time — no Class literals,
  * no extra class loading on the hot path.
  *
- * Constructor-safe: ByteBuddy defers enter-advice in <init> until after the
- * delegate constructor call.
+ * The current application matcher excludes constructors. Exceptions here mean
+ * exceptional method exits, not every thrown/caught exception. Advice does not
+ * suppress failures from the basic tracing callbacks.
  */
 public final class MethodTraceAdvice {
 

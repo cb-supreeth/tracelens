@@ -1,6 +1,7 @@
 package com.chargebee.tracelens.agent;
 
 import com.chargebee.tracelens.bridge.TraceRuntime;
+import com.chargebee.tracelens.bridge.MessagingBoundaryRuntime;
 import net.bytebuddy.asm.Advice;
 
 /**
@@ -13,8 +14,20 @@ public final class SqsProducerAdvice {
     private SqsProducerAdvice() {
     }
 
-    @Advice.OnMethodEnter
-    public static void enter(@Advice.Argument(0) Object sendMessageRequest) {
-        TraceRuntime.injectMessageAttributes(sendMessageRequest);
+    @Advice.OnMethodEnter(suppress = Throwable.class)
+    public static Object enter(@Advice.Argument(0) Object sendMessageRequest,
+                               @Advice.Origin("#m") String method) {
+        boolean batch = "sendMessageBatch".equals(method);
+        // Preserve the existing single-message propagation behavior. Batch
+        // observation does not add new header/attribute propagation.
+        if (!batch && MessagingBoundaryRuntime.isPropagationEnabled()) {
+            TraceRuntime.injectMessageAttributes(sendMessageRequest);
+        }
+        return MessagingBoundaryRuntime.enterSqs(sendMessageRequest, batch);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
+    public static void exit(@Advice.Enter Object token, @Advice.Thrown Throwable failure) {
+        MessagingBoundaryRuntime.exitPublish(token, failure);
     }
 }

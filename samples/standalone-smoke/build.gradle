@@ -1,0 +1,101 @@
+// These applications have no TraceLens dependency. Only -javaagent installs tracing.
+sourceSets {
+    javaxFixture
+    jakartaFixture { java.srcDir layout.buildDirectory.dir('generated/jakartaFixture') }
+    java8Smoke { java.srcDir 'src/smoke/java' }
+    java21Smoke { java.srcDir 'src/smoke/java' }
+}
+
+dependencies {
+    javaxFixtureCompileOnly 'javax.servlet:javax.servlet-api:3.0.1'
+    jakartaFixtureCompileOnly 'org.apache.tomcat.embed:tomcat-embed-core:10.1.33'
+    java8SmokeImplementation 'org.apache.tomcat.embed:tomcat-embed-core:7.0.54'
+    java8SmokeImplementation 'org.apache.tomcat.embed:tomcat-embed-logging-juli:7.0.54'
+    java8SmokeImplementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
+    java21SmokeImplementation 'org.apache.tomcat.embed:tomcat-embed-core:10.1.33'
+    java21SmokeImplementation 'jakarta.annotation:jakarta.annotation-api:2.1.1'
+    java21SmokeImplementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
+}
+
+// Exercise identical application behavior with the two incompatible servlet APIs.
+def jakartaSources = tasks.register('generateJakartaFixture', Sync) {
+    from 'src/javaxFixture/java'
+    into layout.buildDirectory.dir('generated/jakartaFixture')
+    filter { line -> line.replace('javax.servlet', 'jakarta.servlet') }
+}
+tasks.named('compileJakartaFixtureJava', JavaCompile) {
+    dependsOn jakartaSources
+    options.release = 21
+}
+tasks.named('compileJavaxFixtureJava', JavaCompile) { options.release = 8 }
+tasks.named('compileJava8SmokeJava', JavaCompile) { options.release = 8 }
+tasks.named('compileJava21SmokeJava', JavaCompile) { options.release = 21 }
+
+def agentJar = project(':tracelens-agent').tasks.named('shadowJar')
+['java8': 'javax', 'java21': 'jakarta'].each { vm, servletApi ->
+    tasks.register("${vm}Smoke", JavaExec) {
+        group = 'verification'
+        description = "Verify agent-only tracing in ${vm == 'java8' ? 'Java 8 / Tomcat 7' : 'Java 21 / Tomcat 10'}."
+        dependsOn agentJar, tasks.named("${vm}SmokeClasses"), tasks.named("${servletApi}FixtureClasses")
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(vm == 'java8' ? 8 : 21)
+        }
+        classpath = sourceSets["${vm}Smoke"].runtimeClasspath
+        mainClass = 'com.example.smoke.StandaloneSmoke'
+        doFirst {
+            args sourceSets["${servletApi}Fixture"].output.classesDirs.singleFile.absolutePath, servletApi
+            jvmArgs "-javaagent:${agentJar.get().archiveFile.get().asFile.absolutePath}=standalone",
+                    "-Dtracelens.configPath=${file('src/smoke/resources/tracelens.json').absolutePath}",
+                    '-Dtracelens.port=0', '-Dtracelens.http.includePaths=/api',
+                    '-Dsun.net.http.allowRestrictedHeaders=true'
+        }
+    }
+}
+
+tasks.register('java21NoConfigSmoke', JavaExec) {
+    group = 'verification'
+    description = 'Verify a single agent switch records HTTP metadata without a config file or filter.'
+    dependsOn agentJar, java21SmokeClasses, jakartaFixtureClasses
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+    classpath = sourceSets.java21Smoke.runtimeClasspath
+    mainClass = 'com.example.smoke.StandaloneSmoke'
+    doFirst {
+        args sourceSets.jakartaFixture.output.classesDirs.singleFile.absolutePath, 'jakarta', 'metadata'
+        jvmArgs "-javaagent:${agentJar.get().archiveFile.get().asFile.absolutePath}=standalone",
+                '-Dtracelens.port=0'
+    }
+}
+
+tasks.register('occupiedPortSmoke', JavaExec) {
+    group = 'verification'
+    description = 'Verify unavailable debug port does not prevent the host JVM from starting.'
+    dependsOn agentJar, java21SmokeClasses
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+    classpath = sourceSets.java21Smoke.runtimeClasspath
+    mainClass = 'com.example.smoke.OccupiedPortSmoke'
+    doFirst { args agentJar.get().archiveFile.get().asFile.absolutePath }
+}
+
+tasks.register('standaloneSmoke') {
+    group = 'verification'
+    description = 'Run standalone tracing against both servlet namespaces with no application adapter.'
+    dependsOn java8Smoke, java21Smoke, java21NoConfigSmoke, occupiedPortSmoke
+}
+
+tasks.register('distributedSmoke', JavaExec) {
+    group = 'verification'
+    description = 'Trace real HTTP calls between isolated Java 8 and Java 21 service JVMs.'
+    dependsOn agentJar, java8SmokeClasses, java21SmokeClasses, javaxFixtureClasses, jakartaFixtureClasses
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+    classpath = sourceSets.java21Smoke.runtimeClasspath
+    mainClass = 'com.example.smoke.DistributedSmoke'
+    doFirst {
+        args agentJar.get().archiveFile.get().asFile.absolutePath,
+                javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(8) }.get().executablePath.asFile.absolutePath,
+                sourceSets.java8Smoke.runtimeClasspath.asPath,
+                sourceSets.javaxFixture.output.classesDirs.singleFile.absolutePath,
+                javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }.get().executablePath.asFile.absolutePath,
+                sourceSets.java21Smoke.runtimeClasspath.asPath,
+                sourceSets.jakartaFixture.output.classesDirs.singleFile.absolutePath
+    }
+}

@@ -6,3 +6,10 @@ out/
 .idea/
 *.iml
 .DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+.tracelens/

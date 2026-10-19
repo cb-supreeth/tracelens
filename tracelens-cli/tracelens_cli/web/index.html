@@ -5,43 +5,105 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TraceLens</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/trace-graph.css">
 </head>
 <body>
   <header>
     <div class="brand">Trace<span>Lens</span></div>
     <div id="status" class="status">connecting…</div>
     <div class="spacer"></div>
-    <input id="filter" type="search" placeholder="filter by lens id / user…">
     <label class="autorefresh"><input id="autorefresh" type="checkbox" checked> live</label>
+    <button id="refresh">Refresh</button>
     <button id="reset" title="clear all retained traces">reset</button>
   </header>
 
   <main>
+    <div id="notice" class="notice hidden" role="status"></div>
     <section id="list-view">
+      <div class="request-heading"><div><h1>Requests</h1><p>Find an API call, then follow its work across services.</p></div>
+        <div class="list-tabs" aria-label="Request source"><button id="live-tab" aria-pressed="true">Live requests</button><button id="errors-tab" aria-pressed="false">Errors</button><button id="pins-tab" aria-pressed="false">Pinned captures <span id="pin-count">0</span></button></div>
+      </div>
+      <div id="live-controls">
+        <div class="saved-views"><label>Saved view <select id="saved-view"><option value="">Choose a view…</option></select></label><button id="save-view">Save current view</button><button id="delete-view" disabled>Delete view</button><button id="clear-filters">Reset filters</button></div>
+        <div class="filters">
+          <label>API path<input id="path-filter" type="search" placeholder="/api/v2/subscriptions"></label>
+          <label>User<input id="user-filter" type="search" placeholder="Email or API identity"></label>
+          <label>Site ID<input id="site-filter" type="search" placeholder="Exact site ID"></label>
+          <label><span id="service-filter-label">Service</span><select id="service-filter"><option value="">All services</option></select></label>
+          <label>Method<select id="method-filter"><option value="">All methods</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select></label>
+          <label>Channel<select id="channel-filter"><option value="HTTP">HTTP requests</option><option value="">All channels</option><option value="SCHEDULER">Scheduled jobs</option><option value="SQS">Queue messages</option><option value="OTHER">Other</option></select></label>
+          <label>Time window<select id="time-filter"><option value="5">Last 5 minutes</option><option value="30" selected>Last 30 minutes</option><option value="60">Last hour</option><option value="1440">Last 24 hours</option><option value="">All retained</option></select></label>
+          <label id="outcome-filter-control">Outcome<select id="outcome-filter"><option value="">All outcomes</option><option value="error">Errors in any segment</option><option value="success">Successful HTTP</option><option value="active">Active</option><option value="unknown">Unknown</option></select></label>
+          <label>Min duration (ms)<input id="min-duration" type="number" min="0" step="any" placeholder="0"></label>
+          <label>Max duration (ms)<input id="max-duration" type="number" min="0" step="any" placeholder="Any"></label>
+          <label class="wide-filter">Trace ID or label<input id="filter" type="search" placeholder="Trace ID, segment ID, or reproduction label"></label>
+        </div>
+        <div id="error-controls" class="filters error-filters hidden">
+          <label>Error category<select id="error-category"><option value="">All categories</option><option value="http4xx">HTTP 4xx</option><option value="http5xx">HTTP 5xx</option><option value="timeout">Timeout</option><option value="execution">Execution failure</option></select></label>
+          <label>Exact HTTP status<input id="error-http-status" type="number" min="100" max="599" step="1" placeholder="Any status"></label>
+          <label>Boundary exception class<input id="error-exception-class" type="search" placeholder="java.lang.IllegalStateException"></label>
+        </div>
+        <div class="list-options"><label id="collapse-apis-control"><input id="collapse-apis" type="checkbox" checked> Collapse repeated APIs</label><span id="list-filter-help">Filters select requests; they do not change agent recording. Duration is the root service’s local duration.</span></div>
+      </div>
+      <p id="error-help" class="error-help hidden">Retained failure evidence, not an error rate. Service, API path, method and channel match the same failing segment; user and site match the request. Signature groups may overlap. A successful root response does not establish recovery from other observed failures.</p>
+      <p id="pin-help" class="hidden">Pinned snapshots are saved only in this browser on this viewer address, including captured source lines. They are not a shared archive or available through MCP. Clearing browser data removes them.</p>
+      <div id="list-message" role="status" class="notice hidden"></div>
+      <div id="error-state" class="error-state hidden" role="status" aria-live="polite"></div>
+      <p id="results-summary" aria-live="polite"></p>
+      <div class="table-scroll">
       <table id="traces">
         <thead>
           <tr>
-            <th>lens id</th><th>user</th><th>channel</th><th>status</th>
-            <th>events</th><th>size</th><th>started</th><th>last activity</th>
+            <th>Request</th><th>Services</th><th>User / site</th><th>Outcome</th><th>Duration</th><th>Started</th><th>Actions</th>
           </tr>
         </thead>
         <tbody id="trace-rows"></tbody>
       </table>
-      <div id="empty" class="empty hidden">
-        no traces retained — label a request with
-        <code>tracelens-id</code> + <code>tracelens-user</code> headers, or just hit the service
       </div>
+      <div id="empty" class="empty hidden">
+        No matching requests. Broaden the time window or channel, or clear filters. Only retained traces can be shown.
+      </div>
+    </section>
+
+    <section id="journey-view" class="hidden">
+      <p class="snapshot-banner hidden"></p>
+      <div class="detail-head"><button id="journey-back">← requests</button><div id="journey-meta"></div></div>
+      <div class="journey-toolbar">
+        <div class="list-tabs" aria-label="Request presentation">
+          <button id="journey-diagram-tab" aria-pressed="true">Flow diagram</button>
+          <button id="journey-details-tab" aria-pressed="false">Service details</button>
+        </div>
+        <div class="journey-actions">
+          <button id="journey-copy-link" title="Works while the live trace is retained">Copy request link</button>
+          <button id="journey-download">Download graph JSON</button>
+        </div>
+      </div>
+      <p class="causal-note">Observed call relationships, not a shared time axis. Durations are local and must not be added across services.</p>
+      <div id="journey-warnings" class="notice"></div>
+      <div id="journey-graph" aria-label="Observed request flow"></div>
+      <div id="journey-tree"></div>
     </section>
 
     <section id="detail-view" class="hidden">
+      <p class="snapshot-banner hidden"></p>
       <div class="detail-head">
         <button id="back">← back</button>
+        <button id="view-journey">cross-service trace</button>
         <div id="trace-meta"></div>
       </div>
+      <section id="dependency-summary" class="dependency-summary" aria-label="Observed external boundaries"></section>
+      <label class="timeline-filter">Timeline view
+        <select id="timeline-mode"><option value="all">All execution events</option><option value="boundaries">External boundaries and exceptions only</option></select>
+      </label>
       <div id="timeline" class="timeline"></div>
     </section>
   </main>
-
+  <dialog id="name-dialog"><form method="dialog"><h2 id="name-title">Name capture</h2><label>Name<input id="name-input" maxlength="100" required autocomplete="off"></label><p id="name-help"></p><div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button id="name-submit" value="save">Save</button></div></form></dialog>
+  <script src="/static/request-model.js"></script>
+  <script src="/static/browser-store.js"></script>
+  <script src="/static/request-ui.js"></script>
+  <script src="/static/trace-graph.js"></script>
+  <script src="/static/dependency-ui.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

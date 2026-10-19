@@ -1,0 +1,14 @@
+<!-- Insert before the existing application filter mappings in WEB-INF/web.xml.
+     Registration is explicit: cb-app disables servlet annotation/SCI discovery. -->
+<filter>
+    <filter-name>TraceLens</filter-name>
+    <filter-class>com.chargebee.tracelens.servlet.TraceLensFilter</filter-class>
+    <async-supported>true</async-supported>
+</filter>
+<filter-mapping>
+    <filter-name>TraceLens</filter-name>
+    <url-pattern>/*</url-pattern>
+    <dispatcher>REQUEST</dispatcher>
+    <dispatcher>ASYNC</dispatcher>
+    <dispatcher>ERROR</dispatcher>
+</filter-mapping>

@@ -33,15 +33,17 @@ import static net.bytebuddy.matcher.ElementMatchers.nameStartsWith;
 import static net.bytebuddy.matcher.ElementMatchers.named;
 import static net.bytebuddy.matcher.ElementMatchers.none;
 import static net.bytebuddy.matcher.ElementMatchers.not;
+import static net.bytebuddy.matcher.ElementMatchers.returns;
 import static net.bytebuddy.matcher.ElementMatchers.takesArgument;
 import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
 
 /**
  * tracelens agent: line-level + method-level capture for configured packages.
  *
- * Config resolution (mirrors FlowLens — no implicit discovery, premain aborts without it):
+ * Config resolution (adapter mode requires scope; standalone can record HTTP metadata alone):
  *   1. -Dtracelens.configPath=/abs/path/tracelens.json   (full config)
  *   2. -Dtracelens.packages=com.chargebee.ems            (minimal fallback)
+ *   3. -javaagent:...=standalone without scope          (request metadata only)
  *
  * The bridge (TraceRuntime & co) must be visible to instrumented classes in any
  * classloader, so the embedded bridge jar is appended to the bootstrap search path.
@@ -57,11 +59,26 @@ public final class TraceLensAgent {
     }
 
     public static void premain(String args, Instrumentation inst) {
+        boolean standalone = "standalone".equals(args) || Boolean.getBoolean("tracelens.standalone");
+        if (standalone) System.setProperty("tracelens.standalone", "true");
+        try {
+            initialize(inst, standalone);
+        } catch (Throwable failure) {
+            if (!standalone) throw new IllegalStateException("TraceLens initialization failed", failure);
+            // An optional observer must not keep the host from starting (for example
+            // on an unsupported VM, an invalid config, or an unavailable debug port).
+            try { StandaloneRuntime.stop(); } catch (Throwable ignored) { }
+            log("standalone initialization failed; continuing application without tracing: " + failure);
+        }
+    }
+
+    private static void initialize(Instrumentation inst, boolean standalone) {
         long startNanos = System.nanoTime();
         log("premain starting");
 
-        TraceLensConfig config = resolveConfig();
+        TraceLensConfig config = resolveConfig(standalone);
         injectIntoBootstrap(inst);
+        if (standalone && !StandaloneRuntime.start(config)) return;
 
         ElementMatcher.Junction<TypeDescription> typeMatcher = scopeMatcher(config);
         AsmVisitorWrapper methodAdvice = selectMethodAdvice(config);
@@ -156,8 +173,15 @@ public final class TraceLensAgent {
         if (config.isInstrumentExecutors()) {
             installExecutorInstrumentation(inst);
         }
-        if (config.isInstrumentMessaging()) {
+        com.chargebee.tracelens.bridge.MessagingBoundaryRuntime.configure(
+                config.isCaptureMessagingBoundaries(), config.isInstrumentMessaging());
+        if (config.isInstrumentMessaging() || config.isCaptureMessagingBoundaries()) {
             installMessagingInstrumentation(inst);
+        }
+        if (standalone) {
+            HttpInstrumentation.install(inst);
+            HttpIdentityInstrumentation.install(inst, config.getHttpIdentityHooks());
+            if (config.isHttpClientCaptureEnabled()) HttpClientInstrumentation.install(inst);
         }
 
         long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
@@ -175,15 +199,15 @@ public final class TraceLensAgent {
         premain(args, inst);
     }
 
-    private static TraceLensConfig resolveConfig() {
+    private static TraceLensConfig resolveConfig(boolean standalone) {
         String configPath = System.getProperty(TraceLensConfigLoader.CONFIG_PATH_PROPERTY);
-        if (configPath != null && !configPath.isBlank()) {
-            TraceLensConfig config = new TraceLensConfigLoader().load();
+        if (configPath != null && !configPath.trim().isEmpty()) {
+            TraceLensConfig config = new TraceLensConfigLoader().load(standalone);
             log("loaded config from " + configPath + " (applicationId=" + config.getApplicationId() + ")");
             return config;
         }
         String packages = System.getProperty(PACKAGES_PROP);
-        if (packages != null && !packages.isBlank()) {
+        if (packages != null && !packages.trim().isEmpty()) {
             List<String> packageList = new ArrayList<>();
             for (String part : packages.split(",")) {
                 if (!part.trim().isEmpty()) {
@@ -191,7 +215,18 @@ public final class TraceLensAgent {
                 }
             }
             log("no configPath; using -D" + PACKAGES_PROP + "=" + packages);
-            return new TraceLensConfig().setApplicationId("unknown").setPackages(packageList);
+            return new TraceLensConfig()
+                    .setApplicationId(System.getProperty("tracelens.applicationId", "cb-app"))
+                    .setApplicationVersion(System.getProperty("tracelens.applicationVersion", "LOCAL"))
+                    .setEvictOnExport(!standalone)
+                    .setPackages(packageList);
+        }
+        if (standalone) {
+            log("no package scope supplied: HTTP metadata only; set -Dtracelens.packages for line capture");
+            return new TraceLensConfig()
+                    .setApplicationId(System.getProperty("tracelens.applicationId", "cb-app"))
+                    .setApplicationVersion(System.getProperty("tracelens.applicationVersion", "LOCAL"))
+                    .setEvictOnExport(false);
         }
         throw new IllegalStateException("[tracelens] no configuration: set -D"
                 + TraceLensConfigLoader.CONFIG_PATH_PROPERTY + " (preferred) or -D" + PACKAGES_PROP);
@@ -280,13 +315,14 @@ public final class TraceLensAgent {
     }
 
     /**
-     * Async correlation seams: SQS producer attribute injection (AWS SDK v1) and
+     * Metadata-only SQS/Kafka boundaries, existing SQS attribute injection, and
      * queueman consumer continuation. App-loaded classes, so plain ignore rules are
      * fine; RETRANSFORMATION covers anything loaded before premain completed.
      */
     private static void installMessagingInstrumentation(Instrumentation inst) {
         try {
             new AgentBuilder.Default()
+                    .disableClassFormatChanges()
                     .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                     .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
                     .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
@@ -294,10 +330,15 @@ public final class TraceLensAgent {
                             .and(not(isInterface())).and(not(isAbstract())))
                     .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
                             builder.visit(Advice.to(SqsProducerAdvice.class)
-                                    .on(named("sendMessage").and(takesArguments(1)))))
+                                    .on(named("sendMessage").and(takesArgument(0,
+                                                    named("com.amazonaws.services.sqs.model.SendMessageRequest")))
+                                            .or(named("sendMessageBatch").and(takesArgument(0,
+                                                    named("com.amazonaws.services.sqs.model.SendMessageBatchRequest"))))
+                                            .and(takesArguments(1)).and(not(isAbstract())))))
                     .installOn(inst);
 
             new AgentBuilder.Default()
+                    .disableClassFormatChanges()
                     .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
                     .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
                     .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
@@ -306,7 +347,33 @@ public final class TraceLensAgent {
                             builder.visit(Advice.to(QueuemanConsumerAdvice.class)
                                     .on(named("processMessage").and(takesArguments(3)))))
                     .installOn(inst);
-            log("messaging instrumentation installed (sqs producer, queueman consumer)");
+
+            new AgentBuilder.Default()
+                    .disableClassFormatChanges()
+                    .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                    .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
+                    .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
+                    .type(named("org.apache.kafka.clients.producer.KafkaProducer"))
+                    .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
+                            builder.visit(Advice.to(KafkaBoundaryAdvice.Producer.class)
+                                    .on(named("send").and(takesArguments(1).or(takesArguments(2)))
+                                            .and(takesArgument(0, named("org.apache.kafka.clients.producer.ProducerRecord")))
+                                            .and(not(isAbstract())))))
+                    .installOn(inst);
+
+            new AgentBuilder.Default()
+                    .disableClassFormatChanges()
+                    .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+                    .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
+                    .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
+                    .type(named("org.apache.kafka.clients.consumer.KafkaConsumer"))
+                    .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
+                            builder.visit(Advice.to(KafkaBoundaryAdvice.Consumer.class)
+                                    .on(named("poll").and(takesArguments(1))
+                                            .and(returns(named("org.apache.kafka.clients.consumer.ConsumerRecords")))
+                                            .and(not(isAbstract())))))
+                    .installOn(inst);
+            log("messaging instrumentation installed (sqs sends, queueman handlers, kafka send/poll)");
         } catch (Throwable t) {
             log("messaging instrumentation failed (continuing without it): " + t);
         }
@@ -358,7 +425,7 @@ public final class TraceLensAgent {
             return;
         }
         try {
-            java.nio.file.Path dir = java.nio.file.Path.of(dumpDir);
+            java.nio.file.Path dir = java.nio.file.Paths.get(dumpDir);
             java.nio.file.Files.createDirectories(dir);
             java.nio.file.Files.write(dir.resolve(typeDescription.getSimpleName() + ".class"),
                     dynamicType.getBytes());

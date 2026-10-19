@@ -5,10 +5,11 @@ import com.chargebee.tracelens.core.trace.Trace;
 import java.lang.reflect.Method;
 
 /**
- * Stamps Chargebee site context onto HTTP traces: siteId, siteType, requestId — read
- * from cb-ms-utils' CbRequestHelper AFTER the security filter has populated it (the
- * filter calls us post-dispatch). Reflective so the starter stays usable in services
- * without cb-ms-* on the classpath (no-op there) — zero app code required.
+ * Stamps Chargebee site context onto HTTP traces: siteId, siteType, requestId, and
+ * the resolved logged-in user. These values are read from cb-ms-utils'
+ * CbRequestHelper after the security filter has populated it. Reflective so the
+ * starter stays usable in services without
+ * cb-ms-* on the classpath (no-op there) — zero app code required.
  */
 final class CbMsContextContributor {
 
@@ -16,6 +17,7 @@ final class CbMsContextContributor {
     private static final Method GET_SITE_ID = method("getSiteId");
     private static final Method GET_SITE_TYPE = method("getSiteType");
     private static final Method GET_REQUEST_ID = method("getRequestId");
+    private static final Method GET_USER_NAME = method("getUserName");
 
     private CbMsContextContributor() {
     }
@@ -29,6 +31,10 @@ final class CbMsContextContributor {
             if (siteId != null) {
                 trace.putAttribute("siteId", String.valueOf(siteId));
             }
+            Object userName = GET_USER_NAME.invoke(null);
+            if (siteId != null && userName != null && "anonymous".equals(trace.getUser())) {
+                trace.setUser(userName + "_" + siteId);
+            }
             Object siteType = GET_SITE_TYPE.invoke(null);
             if (siteType != null) {
                 trace.putAttribute("siteType", String.valueOf(siteType));
@@ -39,6 +45,28 @@ final class CbMsContextContributor {
             }
         } catch (Throwable ignored) {
             // context population is best-effort; never break the request
+        }
+    }
+
+    /**
+     * Builds the default display identity while the cb-ms security context is live.
+     * Explicit tracelens-user headers take precedence in the caller.
+     */
+    static String resolvedUser(String fallback) {
+        if (HELPER == null) {
+            return fallback;
+        }
+        try {
+            Object userName = GET_USER_NAME.invoke(null);
+            Object siteId = GET_SITE_ID.invoke(null);
+            if (userName == null || siteId == null) {
+                return fallback;
+            }
+            String user = String.valueOf(userName);
+            String site = String.valueOf(siteId);
+            return user.isBlank() || site.isBlank() ? fallback : user + "_" + site;
+        } catch (Throwable ignored) {
+            return fallback;
         }
     }
 

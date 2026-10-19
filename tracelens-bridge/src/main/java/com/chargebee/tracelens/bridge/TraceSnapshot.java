@@ -12,9 +12,11 @@ import java.util.Objects;
  *
  * Two ids: traceId is the shared join key across segments/pods (FlowLens's flowlens
  * join semantics); segmentId routes events to one concrete retained trace within a
- * JVM. For a root segment, segmentId == traceId.
+ * JVM. The legacy root convenience constructor uses segmentId == traceId;
+ * distributed HTTP roots use a W3C trace id and a separate segment UUID.
  *
- * Header/attribute names follow FlowLens's flowlens-id / flowlens-user convention.
+ * Diagnostic labels use tracelens-* names; HTTP W3C propagation has its own carrier
+ * and does not automatically transmit this entire attribute map.
  */
 public final class TraceSnapshot {
 
@@ -22,6 +24,12 @@ public final class TraceSnapshot {
     public static final String USER_KEY = "tracelens-user";
     public static final String TRACE_ID_KEY = "tracelens-trace-id";
     public static final String SEGMENT_ID_KEY = "tracelens-segment-id";
+    /** Browser/user-intent id shared by all requests started by one UI action. */
+    public static final String ACTION_ID_KEY = "tracelens-action-id";
+    /** Human-readable name for the browser/user action, e.g. "update-user-licence". */
+    public static final String ACTION_NAME_KEY = "tracelens-action-name";
+    /** Opaque browser-session identifier; never use a cookie or other secret here. */
+    public static final String SESSION_ID_KEY = "tracelens-session-id";
 
     private final String traceId;
     private final String segmentId;
@@ -85,7 +93,7 @@ public final class TraceSnapshot {
             return null;
         }
         String traceId = map.get(TRACE_ID_KEY);
-        if (traceId == null || traceId.isBlank()) {
+        if (traceId == null || traceId.trim().isEmpty()) {
             return null;
         }
         Map<String, String> rest = new LinkedHashMap<>(map);

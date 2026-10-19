@@ -63,4 +63,16 @@ class TraceSinkTest {
                 .containsEntry("system", "ClickhouseQueryExecutor")
                 .containsEntry("detail", "executeQueryAsync");
     }
+
+    @Test
+    void messagingBoundaryRetainsMetadataAsBoundedExternalEvent() {
+        Trace trace = activeTrace();
+        Map<String, String> attrs = Map.of("boundaryKind", "messaging", "system", "kafka",
+                "direction", "publish", "destination", "billing-events", "operation", "send",
+                "status", "SUBMITTED", "evidenceKind", "client-boundary");
+        sink.onBoundary(trace.getSegmentId(), attrs);
+        assertThat(eventsOf(trace)).hasSize(1);
+        assertThat(eventsOf(trace).get(0).getType()).isEqualTo(EventType.EXTERNAL_CALL);
+        assertThat(eventsOf(trace).get(0).getAttributes()).containsAllEntriesOf(attrs);
+    }
 }

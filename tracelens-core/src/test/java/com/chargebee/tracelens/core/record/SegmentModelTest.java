@@ -6,7 +6,6 @@ import com.chargebee.tracelens.bridge.TraceSnapshot;
 import com.chargebee.tracelens.core.config.TraceLensConfig;
 import com.chargebee.tracelens.core.store.TraceStore;
 import com.chargebee.tracelens.core.trace.EntryChannel;
-import com.chargebee.tracelens.core.trace.Trace;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 

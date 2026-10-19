@@ -1,7 +1,0 @@
-Metadata-Version: 2.4
-Name: tracelens-cli
-Version: 0.1.0
-Summary: CLI for TraceLens: list, export and render line-level execution traces from a running Chargebee service
-Requires-Python: >=3.10
-Provides-Extra: test
-Requires-Dist: pytest>=8; extra == "test"

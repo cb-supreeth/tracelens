@@ -16,6 +16,14 @@ class TraceLensConfigTest {
     Path tempDir;
 
     @Test
+    void standaloneMayLoadDistributedMetadataOnlyButLegacyStillRequiresScope() throws Exception {
+        Path file = tempDir.resolve("metadata-only.json");
+        Files.writeString(file, "{\"applicationId\":\"metadata\",\"distributedTracingEnabled\":true}");
+        assertThat(new TraceLensConfigLoader().load(file, true).isDistributedTracingEnabled()).isTrue();
+        assertThatThrownBy(() -> new TraceLensConfigLoader().load(file)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void loadsFullConfigFromJson() throws Exception {
         Path config = tempDir.resolve("tracelens.json");
         Files.writeString(config, """

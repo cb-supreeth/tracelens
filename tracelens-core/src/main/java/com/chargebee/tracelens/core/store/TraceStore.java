@@ -18,17 +18,17 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 /**
- * In-memory trace retention. FlowLens-equivalent semantics:
+ * In-memory segment retention:
  *
- *  - maxTrackedRequests: hard LRU cap on concurrently retained traces
- *  - maxTrackedEvents:   global event ceiling; at capacity, new registrations are
- *                        rejected and appends to existing traces are dropped
- *                        (trace marked truncated) until evictions free budget
- *  - idleTtlMinutes:     a sweeper evicts traces with no new events for this long
- *  - evictOnExport:      export removes the trace by default (destructive read)
+ *  - maxTrackedRequests: cap on retained segments, evicting least recent activity
+ *  - maxTrackedEvents:   global event ceiling; registration can evict older segments;
+ *                        appends at capacity are dropped without setting truncated
+ *  - idleTtlMinutes:     sweeper evicts segments with no event/HTTP activity this long
+ *  - evictOnExport:      configurable destructive export (unless explicitly overridden)
  *
- * All mutating operations are serialized on an internal lock; the map itself is an
- * access-ordered LinkedHashMap so LRU order is maintained on reads too.
+ * Map operations are synchronized. Eviction selects the oldest lastActivityNanos;
+ * this is not access-order LRU, and inspection reads do not refresh activity/TTL.
+ * Per-segment event-cap truncation is handled separately by Trace.addEvent.
  */
 public final class TraceStore implements AutoCloseable {
 
@@ -39,7 +39,7 @@ public final class TraceStore implements AutoCloseable {
     private final LongSupplier nanoClock;
     private final LongSupplier millisClock;
 
-    /** Access-ordered LRU: eldest = least recently registered/touched. */
+    /** Insertion-ordered storage; eviction explicitly compares segment activity. */
     private final Map<String, Trace> traces = new LinkedHashMap<>();
     private final AtomicLong totalEvents = new AtomicLong();
     private final AtomicBoolean recordingEnabled = new AtomicBoolean(true);
@@ -62,7 +62,7 @@ public final class TraceStore implements AutoCloseable {
 
     /**
      * Register a new trace. Returns false when recording is disabled or the store is
-     * at capacity even after evicting LRU entries (capacity protects the service;
+     * at capacity even after evicting older-activity entries (capacity protects the service;
      * a rejected registration must never break the request).
      */
     public boolean register(Trace trace) {
@@ -89,7 +89,7 @@ public final class TraceStore implements AutoCloseable {
      */
     public boolean appendEvent(String traceId, TraceEvent event) {
         synchronized (traces) {
-            Trace trace = traces.get(traceId); // access-order touch
+            Trace trace = traces.get(traceId); // Lookup itself does not refresh activity.
             if (trace == null) {
                 return false;
             }
@@ -141,15 +141,24 @@ public final class TraceStore implements AutoCloseable {
      * Export semantics: marks the trace EXPORTED and, when evictOnExport is set,
      * removes it (destructive read — FlowLens default). Returns the trace either way.
      */
-    public Optional<Trace> export(String traceId) {
+    public Optional<Trace> export(String segmentId) {
+        return export(segmentId, null);
+    }
+
+    /**
+     * Export with a per-call eviction override (null = use the configured default).
+     * MCP/CLI inspection passes evict=false so reading a trace doesn't remove it.
+     */
+    public Optional<Trace> export(String segmentId, Boolean evictOverride) {
+        boolean evict = evictOverride == null ? evictOnExport : evictOverride;
         synchronized (traces) {
-            Trace trace = traces.get(traceId);
+            Trace trace = traces.get(segmentId);
             if (trace == null) {
                 return Optional.empty();
             }
             trace.markExported();
-            if (evictOnExport) {
-                remove(traceId);
+            if (evict) {
+                remove(segmentId);
             }
             return Optional.of(trace);
         }

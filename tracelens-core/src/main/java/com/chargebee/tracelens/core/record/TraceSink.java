@@ -81,4 +81,15 @@ public final class TraceSink implements TraceRuntime.Sink {
                 .attr("detail", detail)
                 .build());
     }
+
+    @Override
+    public void onBoundary(String segmentId, Map<String, String> attributes) {
+        TraceEvent.Builder event = TraceEvent.builder(EventType.EXTERNAL_CALL)
+                .epochMillis(System.currentTimeMillis()).nanoTime(System.nanoTime())
+                .thread(Thread.currentThread().getName())
+                .message(attributes.get("system") + " " + attributes.get("direction")
+                        + " " + attributes.get("destination"));
+        attributes.forEach(event::attr);
+        store.appendEvent(segmentId, event.build());
+    }
 }

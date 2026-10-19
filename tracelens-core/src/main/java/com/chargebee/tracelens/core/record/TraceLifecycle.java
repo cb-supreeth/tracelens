@@ -5,13 +5,15 @@ import com.chargebee.tracelens.bridge.TraceSnapshot;
 import com.chargebee.tracelens.core.trace.EntryChannel;
 
 import java.util.Map;
+import java.util.Collections;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Bridges the agent's lifecycle hooks (queueman consumer, @Scheduled jobs) to the
  * core: implements the bridge's LifecycleListener SPI. begin/end are same-thread
- * paired by the calling advice; the map guards against leaks if an end is missed.
+ * paired by the calling advice; the map retains scopes until end closes them.
+ * It does not automatically clean up a missing end call.
  */
 public final class TraceLifecycle implements TraceRuntime.LifecycleListener {
 
@@ -33,7 +35,7 @@ public final class TraceLifecycle implements TraceRuntime.LifecycleListener {
             // continued segment: the wire attributes carry the parent's ids
             // (tracelens-segment-id = producing segment); rebuild the wire snapshot
             Map<String, String> wire = new java.util.LinkedHashMap<>(
-                    attributes == null ? Map.of() : attributes);
+                    attributes == null ? Collections.emptyMap() : attributes);
             wire.put(TraceSnapshot.TRACE_ID_KEY, traceId);
             if (lensId != null) {
                 wire.put(TraceSnapshot.LENS_ID_KEY, lensId);

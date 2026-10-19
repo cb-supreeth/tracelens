@@ -1,0 +1,10 @@
+{
+  "applicationId": "cb-app-servlet-smoke",
+  "applicationVersion": "LOCAL",
+  "packages": ["com.chargebee.legacyfixture"],
+  "evictOnExport": true,
+  "capturePayloads": false,
+  "instrumentExecutors": true,
+  "instrumentMessaging": false,
+  "instrumentScheduled": false
+}

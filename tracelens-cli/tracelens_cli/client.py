@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
 
 class DebugApiError(RuntimeError):
-    pass
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 class TraceLensClient:
@@ -25,7 +28,7 @@ class TraceLensClient:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
-            raise DebugApiError(f"{method} {url} -> {e.code}: {body[:300]}") from e
+            raise DebugApiError(f"{method} {url} -> {e.code}: {body[:300]}", e.code) from e
         except urllib.error.URLError as e:
             raise DebugApiError(
                 f"{method} {url} failed: {e.reason} (is the service up with tracelens enabled?)"
@@ -37,11 +40,20 @@ class TraceLensClient:
     def traces(self) -> dict:
         return self._request("GET", "/traces")
 
-    def export(self, trace_id: str) -> dict:
-        return self._request("GET", f"/export/{trace_id}")
+    def export(self, trace_id: str, evict: bool | None = None) -> dict:
+        path = f"/export/{urllib.parse.quote(trace_id, safe='')}"
+        if evict is not None:
+            path += f"?evict={'true' if evict else 'false'}"
+        return self._request("GET", path)
 
     def find_by_lens_id(self, lens_id: str) -> dict:
-        return self._request("GET", f"/find-by-lens-id/{lens_id}")
+        # This endpoint consumes the entire suffix. Preserve literal slashes:
+        # Tomcat rejects encoded slashes by default, while labels contain routes.
+        encoded = urllib.parse.quote(lens_id, safe="/")
+        return self._request("GET", f"/find-by-lens-id/{encoded}")
+
+    def find_by_trace_id(self, trace_id: str) -> dict:
+        return self._request("GET", "/find-by-trace-id/" + urllib.parse.quote(trace_id, safe=""))
 
     def metadata(self) -> dict:
         return self._request("GET", "/metadata")
@@ -56,4 +68,5 @@ class TraceLensClient:
         return self._request("POST", "/disable")
 
     def reset(self, trace_id: str | None = None) -> dict:
-        return self._request("POST", "/reset" + (f"/{trace_id}" if trace_id else ""))
+        path = "/reset" + (f"/{urllib.parse.quote(trace_id, safe='')}" if trace_id else "")
+        return self._request("POST", path)

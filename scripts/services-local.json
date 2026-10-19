@@ -1,0 +1,20 @@
+{
+  "services": [
+    {
+      "name": "cb-app",
+      "url": "http://127.0.0.1:7778",
+      "sourceRoot": "/Users/supreeth/work/chargebee-app",
+      "dependencyAliases": {
+        "127.0.0.1:8082": "cb-ems",
+        "localhost:8082": "cb-ems",
+        "127.0.0.1:8081": "cb-plans",
+        "localhost:8081": "cb-plans"
+      }
+    },
+    {
+      "name": "cb-ems",
+      "url": "http://127.0.0.1:7779",
+      "sourceRoot": "/Users/supreeth/work/cb-ems"
+    }
+  ]
+}

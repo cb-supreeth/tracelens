@@ -1,0 +1,51 @@
+{
+  "applicationId": "cb-app",
+  "applicationVersion": "LOCAL",
+  "packages": [
+    "com.chargebee.app.entitlements",
+    "com.chargebee.app.api.helper.configs.entitlements",
+    "com.chargebee.app.api.helper.ms_col_mapper"
+  ],
+  "excludedPackages": [],
+  "blacklistedNodes": ["ToStringBuilder"],
+  "capturePayloads": false,
+  "maxTrackedEvents": 100000,
+  "maxTrackedRequests": 100,
+  "idleTtlMinutes": 30,
+  "evictOnExport": false,
+  "trackMethods": true,
+  "trackExceptions": true,
+  "instrumentExecutors": true,
+  "instrumentMessaging": false,
+  "captureMessagingBoundaries": true,
+  "instrumentScheduled": false,
+  "requireLabels": false,
+  "distributedTracingEnabled": true,
+  "httpClientCaptureEnabled": true,
+  "httpPropagationAllowedDestinations": ["127.0.0.1:8082", "localhost:8082"],
+  "httpIdentityHooks": [
+    {
+      "id": "cb-app-api-authenticated",
+      "className": "com.chargebee.framework.api.ApiURLConfig",
+      "methodName": "validateApiRequest",
+      "parameterCount": 1,
+      "targetArgument": 0,
+      "requestPath": ["req"],
+      "userPath": ["getMsOriginUser", "email"],
+      "sitePath": ["site", "id"],
+      "trustedUserHeader": "chargebee-ms-name",
+      "trustedUserHeaderValues": ["cb-ui-middleware"],
+      "fallbackUser": "apicall"
+    },
+    {
+      "id": "cb-app-ui-completed",
+      "className": "com.chargebee.app.AppActionModel",
+      "methodName": "exec",
+      "parameterCount": 0,
+      "targetArgument": -1,
+      "requestPath": ["req"],
+      "userPath": ["currentUser", "email"],
+      "sitePath": ["currentSite", "id"]
+    }
+  ]
+}

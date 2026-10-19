@@ -6,6 +6,11 @@ plugins {
     id 'maven-publish'
 }
 
+// Runtime libraries support Java 8; tests still use the root Java 21 toolchain.
+tasks.named('compileJava', JavaCompile) {
+    options.release = 8
+}
+
 dependencies {
     // The bridge: correlation context + the runtime SPI the agent emits into.
     // At runtime in an agent-attached JVM these classes come from bootstrap (agent

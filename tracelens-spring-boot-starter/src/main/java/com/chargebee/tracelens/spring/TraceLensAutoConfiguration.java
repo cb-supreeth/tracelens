@@ -10,6 +10,7 @@ import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -28,10 +29,11 @@ import java.util.List;
  *
  * Config precedence: -Dtracelens.configPath / TRACELENS_CONFIG_PATH / tracelens.config-path
  * (the JSON file shared with the agent) → otherwise synthesized from tracelens.*
- * properties (applicationId defaults to spring.application.name).
+ * properties (applicationId defaults to spring.application.name, then cb-app).
  */
 @AutoConfiguration
 @ConditionalOnProperty(prefix = "tracelens", name = "enabled", havingValue = "true")
+@ConditionalOnExpression("!${tracelens.standalone:false}")
 @EnableConfigurationProperties(TraceLensProperties.class)
 public class TraceLensAutoConfiguration {
 
@@ -46,7 +48,7 @@ public class TraceLensAutoConfiguration {
         }
         TraceLensConfig config = new TraceLensConfig()
                 .setApplicationId(firstNonBlank(props.getApplicationId(),
-                        env.getProperty("spring.application.name"), "unknown"))
+                        env.getProperty("spring.application.name"), "cb-app"))
                 .setApplicationVersion(props.getApplicationVersion())
                 .setPackages(props.getPackages())
                 .setExcludedPackages(props.getExcludedPackages())
@@ -93,8 +95,10 @@ public class TraceLensAutoConfiguration {
         registration.setFilter(new TraceLensFilter(tracer, store, config.isRequireLabels(),
                 props.getIgnoredPaths()));
         registration.addUrlPatterns("/*");
-        // early enough to wrap auth/error handling; ASYNC so redispatches pass through
-        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 50);
+        // Run after Spring Security has established cb-ms request context, but still
+        // before normal application filters/controllers. This lets auto-labelled
+        // traces use <logged-in-user>_<site-id> from their first event onward.
+        registration.setOrder(Ordered.LOWEST_PRECEDENCE - 100);
         registration.setDispatcherTypes(EnumSet.of(DispatcherType.REQUEST, DispatcherType.ASYNC,
                 DispatcherType.ERROR));
         return registration;

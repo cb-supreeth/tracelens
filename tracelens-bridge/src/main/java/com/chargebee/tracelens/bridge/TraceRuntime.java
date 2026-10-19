@@ -8,16 +8,18 @@ import java.util.concurrent.atomic.AtomicLong;
  * The static API called from woven bytecode. Lives in the bootstrap classloader so
  * every instrumented classloader can reach it.
  *
- * Events flow: woven bytecode -> TraceRuntime.onX -> registered Sink (app-side core),
- * routed by the current SEGMENT id. Without a registered sink (agent-only mode, or
- * app not ready yet) events are counted and dropped — never an error into app code.
+ * Events flow: woven bytecode -> TraceRuntime.onX -> registered core Sink, routed
+ * by SEGMENT id. The owner can be the standalone agent or a legacy app adapter.
+ * Without a sink/context, events are counted and dropped. Basic line/method sink
+ * calls are not exception-contained here; this is not a universal fail-open layer.
  *
  * Lifecycle hooks (queueman consumer, @Scheduled jobs) go through the registered
- * LifecycleListener (app-side core); absent one, they are no-ops.
+ * LifecycleListener; absent one, they are no-ops. Lifecycle and metadata-boundary
+ * entry points explicitly contain tracing failures.
  */
 public final class TraceRuntime {
 
-    /** Implemented by the app-side core; registered once the tracing stack is ready. */
+    /** Implemented by core; registered by the selected standalone/adapter runtime owner. */
     public interface Sink {
         void onLine(String segmentId, String fqcn, int line);
 
@@ -31,14 +33,18 @@ public final class TraceRuntime {
         default void onDbRoute(String segmentId, String routeKey) {
         }
 
-        /** A call left the process (ClickHouse, DynamoDB, ...). system + short detail. */
+        /** Configured wrapper-entry marker; not proof that a network call occurred. */
         default void onExternalCall(String segmentId, String system, String detail) {
+        }
+
+        /** Metadata-only observed client boundary; no message payload or arbitrary headers. */
+        default void onBoundary(String segmentId, Map<String, String> attributes) {
         }
     }
 
     /**
      * Entry/exit lifecycle for agent-driven trace boundaries (message consumption,
-     * scheduled jobs). Implemented by the app-side core. begin() activates the
+     * scheduled jobs). Implemented by core in the selected runtime. begin() activates the
      * context on the calling thread and returns the new segment id; end() completes
      * the segment and restores the previous context. Same-thread begin/end pairing.
      */
@@ -155,6 +161,24 @@ public final class TraceRuntime {
         EMITTED.incrementAndGet();
     }
 
+    /** A boundary is routed to the segment active at entry, even if a callback changes context. */
+    public static void onBoundary(String segmentId, Map<String, String> attributes) {
+        try {
+            Sink s = sink;
+            if (s == null) {
+                DROPPED_NO_SINK.incrementAndGet();
+            } else if (segmentId == null) {
+                DROPPED_NO_TRACE.incrementAndGet();
+            } else {
+                s.onBoundary(segmentId, java.util.Collections.unmodifiableMap(
+                        new java.util.LinkedHashMap<>(attributes)));
+                EMITTED.incrementAndGet();
+            }
+        } catch (Throwable ignored) {
+            // Observation must never affect a producer, consumer, or its callback.
+        }
+    }
+
     // ---- lifecycle hooks (called from agent advice for queueman/@Scheduled seams) ----
 
     /** Begin a segment via the registered listener; null when recording is off/absent. */
@@ -215,24 +239,33 @@ public final class TraceRuntime {
 
     // ---- app-side wiring ----
 
-    public static void registerSink(Sink newSink) {
+    public static synchronized void registerSink(Sink newSink) {
         sink = newSink;
     }
 
-    public static void unregisterSink() {
+    public static synchronized void unregisterSink() {
         sink = null;
+    }
+
+    /** Remove only the caller's registration (safe when another owner has replaced it). */
+    public static synchronized void unregisterSink(Sink expected) {
+        if (sink == expected) sink = null;
     }
 
     public static boolean hasSink() {
         return sink != null;
     }
 
-    public static void registerLifecycleListener(LifecycleListener listener) {
+    public static synchronized void registerLifecycleListener(LifecycleListener listener) {
         lifecycleListener = listener;
     }
 
-    public static void unregisterLifecycleListener() {
+    public static synchronized void unregisterLifecycleListener() {
         lifecycleListener = null;
+    }
+
+    public static synchronized void unregisterLifecycleListener(LifecycleListener expected) {
+        if (lifecycleListener == expected) lifecycleListener = null;
     }
 
     /** Called by TraceContext.wrap when a task is actually wrapped (diagnostics). */

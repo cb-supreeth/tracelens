@@ -1,0 +1,69 @@
+plugins {
+    id 'java-library'
+    id 'com.gradleup.shadow' version '8.3.5'
+}
+
+// Servlet 3.0 / Java 8, including cb-app's Tomcat 7. No Spring dependencies.
+tasks.named('compileJava', JavaCompile) { options.release = 8 }
+
+dependencies {
+    implementation project(':tracelens-core')
+    compileOnly 'javax.servlet:javax.servlet-api:3.0.1'
+}
+
+// Drop one jar into WEB-INF/lib without changing the application's Jackson version.
+// The embedded bridge is parent-delegated to bootstrap when the agent is attached.
+shadowJar {
+    archiveClassifier.set('adapter')
+    relocate 'com.fasterxml.jackson', 'com.chargebee.tracelens.servlet.internal.jackson'
+    relocate 'com.chargebee.tracelens.core', 'com.chargebee.tracelens.servlet.internal.core'
+}
+build.dependsOn shadowJar
+
+// Exercise delivered jars in cb-app's actual servlet generation and Java runtime.
+// Neither the adapter nor the fixture belongs on the container parent classpath.
+sourceSets {
+    servletFixture
+    java8Smoke
+}
+
+dependencies {
+    servletFixtureCompileOnly 'javax.servlet:javax.servlet-api:3.0.1'
+    servletFixtureCompileOnly project(':tracelens-bridge')
+    java8SmokeImplementation 'org.apache.tomcat.embed:tomcat-embed-core:7.0.54'
+    java8SmokeImplementation 'org.apache.tomcat.embed:tomcat-embed-logging-juli:7.0.54'
+    java8SmokeImplementation 'com.fasterxml.jackson.core:jackson-databind:2.17.2'
+    java8SmokeCompileOnly project(':tracelens-bridge')
+}
+
+tasks.named('compileServletFixtureJava', JavaCompile) { options.release = 8 }
+tasks.named('compileJava8SmokeJava', JavaCompile) { options.release = 8 }
+
+def agentJar = project(':tracelens-agent').tasks.named('shadowJar')
+['Enabled', 'Disabled'].each { mode ->
+    tasks.register("java8Smoke${mode}", JavaExec) {
+        group = 'verification'
+        description = "Run the ${mode.toLowerCase()} shaded adapter on Java 8 / Tomcat 7.0.54."
+        dependsOn shadowJar, agentJar, java8SmokeClasses, servletFixtureClasses
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(8)
+        }
+        classpath = sourceSets.java8Smoke.runtimeClasspath
+        mainClass = 'com.chargebee.tracelens.compat.Java8ServletSmoke'
+        doFirst {
+            args tasks.shadowJar.archiveFile.get().asFile.absolutePath,
+                    sourceSets.servletFixture.output.classesDirs.singleFile.absolutePath
+            jvmArgs "-javaagent:${agentJar.get().archiveFile.get().asFile.absolutePath}",
+                    "-Dtracelens.configPath=${file('src/java8Smoke/resources/tracelens-servlet-smoke.json').absolutePath}",
+                    "-Dtracelens.enabled=${mode == 'Enabled'}",
+                    '-Dsun.net.http.allowRestrictedHeaders=true',
+                    '-Dtracelens.http.includePaths=/api'
+        }
+    }
+}
+
+tasks.register('java8Smoke') {
+    group = 'verification'
+    description = 'Verify enabled and disabled adapters in isolated Java 8 / Tomcat 7.0.54 JVMs.'
+    dependsOn java8SmokeEnabled, java8SmokeDisabled
+}
