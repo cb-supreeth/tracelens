@@ -1,143 +1,219 @@
 # How to use TraceLens
 
-TraceLens helps you answer: **“When I called this API, which code ran and which
-services did it call?”** Use it to understand a feature, debug a reproduction or
-compare the code path before and after a change.
-
-Start with one service. This guide uses **cb-app**; its repository is named
-**chargebee-app**. Examples assume your checkouts are under `~/work`; adjust paths
-for your machine. TraceLens is a local-development POC, not a production setup.
+TraceLens answers: **When I called this API, which code ran and which services
+did it call?** Reproduce one request, inspect the recorded evidence, and save it
+before changing or restarting the application. This is a local-development tool,
+not proof of complete coverage or that a change is safe.
 
 ## 1. One-time setup
 
-You need the TraceLens checkout, a normally working application, Python 3.10+
-and JDK 21 to build the agent. Building the agent with Java 21 does not change
-cb-app's own Java 8 runtime.
+Have your selected applications and their normal dependencies working locally.
+Unpack the current Java bundle and run:
 
-**Attach the agent first.** Follow [cb-app setup](cb-app-integration.md): build
-the shaded agent, add the opt-in `setenv.sh` hook, and install the optional
-`Makefile.tracelens` launcher. It is not installed automatically.
-Then, from your already-built cb-app checkout:
-
-```bash
-cd ~/work/chargebee-app
-make -f Makefile.tracelens check
-make -f Makefile.tracelens restart
-make -f Makefile.tracelens status
+```sh
+sh setup.sh
 ```
 
-Restart clears Tomcat logs, clears live traces and enables jobs; save anything
-important first. `make ... up` reuses a healthy JVM, so it cannot attach the agent
-to an application already running without it.
+Choose **Set up TraceLens**, select services/locations and capture settings, then
+review the installation. The supported setup catalog includes cb-app, EMS, Plans,
+Ledger and GO; UI middleware is not offered. You need only the selected services.
+Follow the UI; consult [guided setup](guided-setup.md) when you need field or
+launcher details.
 
-**Install the CLI/viewer.** For a new Python environment:
+The capture levels are **Overview** (supported services/dependencies, timing and
+errors), **Methods** (adds method entry/exit), and **Detailed** (adds executed
+lines). HTTP query/body and SQL/binding capture are separate opt-ins. Only admitted
+API paths are captured; method/line detail also needs matching package scope.
+Read the effective policy preview: a scoped override or expiry can change the
+level used for a particular request.
 
-```bash
-cd ~/work/cb-tracelens/tracelens-cli
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-```
-
-If the CLI is already installed in this environment, just activate it. In each
-new terminal, return to this directory and run `. .venv/bin/activate` before
-using the commands below.
-
-For **EMS instead**, use its [agent setup](sharing-and-configuration.md#2-attach-it-at-startup),
-service config and debug port **7779**, with `~/work/cb-ems` as the source root.
-For another Java service, follow [standalone setup](standalone-agent.md).
+To change settings later, rerun the script, choose **Edit capture settings**, load
+the installation and select one service. **Add service** adds another supported
+service. Valid peers can be configured even when another service fails. Saving
+does not restart an app or prove its JVM loaded the new settings. A supported
+runtime action requires separate review/confirmation; unmanaged IDE/custom
+processes are not silently adopted or killed. The dashboard expires after
+15 minutes; run the script again to reopen it.
 
 ## 2. Check setup and open the viewer
 
-```bash
-tracelens --url http://127.0.0.1:7778 doctor --source-root "$HOME/work/chargebee-app"
-tracelens --url http://127.0.0.1:7778 serve --port 7777 --source-root "$HOME/work/chargebee-app"
+After starting selected applications with their agents, use the installed scripts:
+
+```sh
+sh /absolute/path/to/install/check-setup.sh
+sh /absolute/path/to/install/start-viewer.sh
 ```
 
-Resolve any blocking issues reported by `doctor`, then open
-[the viewer](http://127.0.0.1:7777). Leave the `serve` command running; Ctrl+C stops
-only the viewer, not your application.
+Open the returned URL, normally [the local viewer](http://127.0.0.1:7781).
+The viewer, application and agent debug ports are different. Starting the viewer
+does not start an application or attach an agent. Setup checks are read-only;
+verify capture with a real reproduction next.
 
-**7778 is the agent's debug port; 7777 is the viewer.** Neither is cb-app's normal
-application port. Starting the viewer does not start the application or attach
-the agent. To view cb-app and EMS together, follow the
-[two-service registry setup](distributed-tracing.md#run-one-ui-or-mcp-for-both).
+| Workspace | Use it for |
+| --- | --- |
+| **Requests** | Live requests, Scheduled jobs, Errors and guided investigation |
+| **Saved captures** | Reopen evidence, select a Before/After pair, compare and search |
+| **Performance** | Analyze captured JDBC queries on demand |
+| **Services & capture settings** | Check connections and find instructions to reopen setup |
+
+The compact connection menu distinguishes connected, recording, paused and
+unreachable services. Connection health is not request success or capture
+completeness. **What is TraceLens** and the **ⓘ** controls explain navigation
+without changing recording or your evidence.
 
 ## 3. Find the request you just made
 
-1. Use your application's normal logged-in UI or authenticated API client.
-2. In TraceLens, filter by the backend API path, a short time window and your
-   user when available. Enable **Collapse repeated APIs** to reduce clutter.
-3. Open the matching request. Inspect its request-flow graph, then open a service
-   segment to inspect observed methods and source lines. Use **Errors** for repeated failures.
+1. Reproduce through your application's normal authenticated UI or API.
+2. In **Requests → Live requests**, narrow by **API path**, time, **Observed
+   service** and outcome. Use the backend API path, not the browser page route.
+3. Use **More filters** for method, user/site, channel, duration or trace/label.
+   **Group repeated APIs** reduces repeated rows; expand a group to choose one run.
+4. Open the request's **Flow diagram**.
 
-For the bundled cb-app config, start with `/api/v2/features`; other API paths
-may need a scope change. A browser route such as `/d/features/test1` is not
-necessarily the API path. Each service shows the path it actually received.
+Live requests means retained evidence, not only currently executing requests.
+Its count follows filters/time. **N retained · Capture info** includes older or
+filtered-out requests. If nothing matches, increase the time window or choose
+**Show all retained**. This clears filters within the current tab; it cannot
+recover evicted evidence or enable recording. Scheduled jobs has independent
+filters. Errors groups failure signatures and counts unique matching requests,
+not the sum of failing service segments.
 
-You can also find the request from another terminal without knowing a trace ID:
+**Request data keyword → Search** searches captured query names/values and
+request-body text, including downstream matches, but not SQL or response bodies.
+Read coverage/expiry warnings and narrow filters when limited. Changing filters
+resets the keyword result; auto-refresh does not rescan payloads. Saved views
+remember filters, not trace data.
 
-```bash
-tracelens --url http://127.0.0.1:7778 investigate \
-  --method GET --path /api/v2/features --since-minutes 2
-```
+While a repeated group or row's **Details** is open, new list results are buffered.
+**Show latest requests** applies them; this does not preserve agent retention.
 
-Multiple matches produce a candidate list. Narrow the path/time, choose a returned
-trace ID, or explicitly add `--selection latest` if that is the run you want.
+### Capture one fresh reproduction
 
-## 4. Ask Cursor or Codex
+Open **Start an investigation**, enter the exact backend path and optional
+method/service/user/site, then **Check capture readiness**. It checks capture
+setup, not application bugs, and does not change configuration.
 
-Connect your client once using [MCP configuration](sharing-and-configuration.md#mcp-configuration).
-Use the installed `tracelens` executable's absolute path, the same agent URL and
-the correct source root. Reconnect after updating TraceLens.
+Choose a 60- or 120-second window and **Watch next request & save**. Reproduce
+only after **Watching** appears. It saves one unambiguous new completed request;
+multiple matches or incomplete discovery require review. Canceling or leaving
+stops future watching. If a save was already in flight, check Saved captures.
+Browser/service clocks must agree, and a saved result may be partial.
 
-Then ask:
+### Inspect the request flow
 
-> Check that TraceLens is ready. I just called GET /api/v2/features. Find my
-> request from the last two minutes, explain the code path and show its request
-> flow. If several requests match, let me choose. Separate observed facts from guesses.
+The diagram starts fitted with linked HTTP hops hidden. **Show HTTP hops** reveals
+caller-side cards; **Hide HTTP hops** restores the compact service view. Each
+captured invocation keeps its own service frame/API, so repeated Ledger or cb-app
+segments are not automatically duplicates.
 
-The assistant can discover the IDs itself. Embedded diagrams depend on the
-client; the normal viewer and text results remain available. With the bundled
-multi-service registry, filter by `cb-app`, not `chargebee-app`.
+Select a fixed-size card to open the adjacent **Selected evidence** inspector.
+Details do not grow cards or rearrange the graph. Use **Focus selected**, **Focus
+branch**, the minimap and zoom controls. Arrow keys change selection; Escape
+closes the inspector. In the inspector:
 
-## 5. Compare before and after a code change
+- **Service:** open **Request data** for captured input and Copy actions, or
+  **Open code flow** for that service's execution.
+- **DB CALL:** choose a SQL execution to inspect its template, duration, outcome
+  and optional bindings. **SQL with captured values** is a debugging reconstruction;
+  unknown values remain placeholders. Native ClickHouse uses the grouped DB view.
+  **DB routing decisions** are separate pool/route observations, not SQL queries.
+- **Cache/queue/external call:** inspect operation/status. **View calling code**
+  or **View caller in …** opens recorded caller context, not the destination's
+  execution. Missing or ambiguous locations remain unavailable, never guessed.
 
-Immediately after reproducing the **old** behavior, save its latest matching run:
+External HTTP services remain visible outside the caller's frame without a
+receiver agent. A configured alias or unambiguous same-capture naming hint can
+replace the peer label; inspect its naming evidence/address. A friendly name
+does not establish captured receiver execution.
 
-```bash
-tracelens --url http://127.0.0.1:7778 capture save features-before \
-  --method GET --path /api/v2/features --since-minutes 2 --selection latest
-```
+Arrow numbers express supported causal/local order. Decimal branches require
+overlapping-call evidence; **?** means unknown order. Durations are local, not
+additive cross-service time. Queue **SUBMITTED** does not prove delivery; a cache
+boundary alone does not prove hit/miss.
 
-Change the code, rebuild/restart the application and repeat the same action with
-equivalent inputs and data. Then:
+### Read the service's code
 
-```bash
-tracelens --url http://127.0.0.1:7778 capture save features-after \
-  --method GET --path /api/v2/features --since-minutes 2 --selection latest
-tracelens capture compare features-before features-after
-```
+**Code flow** is the default reader. **Application logic** reversibly folds
+recognized framework/proxy wrappers and synthetic accessors; ordinary getters,
+incomplete calls and exception branches remain visible. **Reveal** or **All recorded
+calls** restores folded evidence. Search includes collapsed/folded model nodes;
+**Focus selected branch** isolates observed nesting.
 
-Saved captures are bounded local JSON files in `~/.tracelens/captures`, not a DB.
-They survive application restarts and comparisons work offline. Use unique names
-for each experiment; `tracelens capture list` shows IDs if names repeat.
-Browser **Pin capture** is separate storage and cannot be read by MCP.
-See [comparison details and limits](developer-workflow.md#3-save-baseline-and-candidate-evidence).
+**Call tree** shows the same bounded model as a diagram. **Timeline / source**
+shows retained events one page at a time, with pinned navigation/filter controls.
+Use **Wrap event text** for long rows; select a row to inspect or **Copy recorded
+event**, then Escape to return. Source jumps load the page containing the recorded
+anchor. **Open local source** opens today's configured checkout, which may differ
+from the captured build; saved timeline lines remain those preserved with the capture.
+
+Counts distinguish folded/collapsed nodes from omitted evidence. Expansion cannot
+restore data excluded by capture/model limits. Model search is separate from
+**HTTP observations**, which has a bounded destination/path/status search for
+calls without a method owner. Neither searches the entire source repository.
+
+## 4. Keep and compare evidence
+
+Choose **Save snapshot** in the request or row's Details before live evidence
+expires. Reopen it in **Saved captures**. **Copy snapshot link** gives a stable
+local link; a live `#trace=…` link still depends on agent retention. Missing saved
+details never cause a newer live execution to be substituted.
+
+Current paged saves use version-2 compressed chunks; version-1 JSON snapshots
+remain readable. **Download capture archive** and **Import capture archive**
+share a version-2 ZIP as a new saved ID without contacting original services.
+Localhost links alone do not share evidence with teammates. Review request values,
+SQL and source before copying/exporting. See [storage limits](java-capture-storage.md).
+
+Select two viewer captures, Before first, then **Compare selected**. Review the
+pair and choose **Compare saved snapshots**:
+
+1. Start with paired response outcomes and changed external calls.
+2. **Changed methods** shows the outermost supported recorded parent first, with
+   child differences expandable. Unchanged parent counts can still contain changed
+   children; this is not a source-code diff.
+3. Open exact saved service evidence and use **Back to comparison** to return.
+4. **Find in these two captures** filters returned findings; **Search both saved
+   files** performs bounded pair-scoped search beyond the compact report.
+
+Comparison external-call names use exact per-caller configured aliases, with the
+recorded address visible. Names do not alter matching or prove remote execution.
+**All differences** retains method/line/count reports. Check **Before interpreting
+changes**: scope, inputs/builds and omissions can explain differences. “Not observed
+after” does not prove deliberate skipping; one duration difference is not a benchmark.
+
+**Search saved evidence** searches viewer and minimized CLI files, not live services,
+request payloads or the source tree. **Use with CLI/MCP** explicitly creates a
+separate minimized copy for assistant/terminal work. See the
+[developer workflow](developer-workflow.md) for commands and search limits.
+
+## 5. Investigate query performance
+
+Open **Performance**, choose recent requests or one saved capture, set filters and
+thresholds, then **Analyze**. Recent-request runs read at most ten newest matching
+requests. Analysis does not enable SQL capture or run continuously.
+
+Use **Category** to focus slow, repeated, suspected N+1 or query-heavy findings.
+Choose a **Captured occurrence**, then **Open query evidence** to inspect that
+exact query and its caller context. The picker is limited to the first 200 retained
+query nodes; category changes filter existing results without rereading evidence.
+
+This analyzes PostgreSQL/MySQL JDBC evidence, not native ClickHouse or fleet-wide
+traffic. Suspected N+1 is a lead, not a confirmed bug; no findings is not a health
+verdict. See [Performance insights](performance-insights.md).
 
 ## If something looks wrong
 
-- **Cannot connect:** run `doctor`; check that the app was restarted with the
-  agent and that you used its debug port, not the application/viewer port.
-- **No matching request:** check authentication, API path, time window and capture
-  scope. The bundled cb-app setup captures `/api/v2/features` by default.
-- **Request exists but source lines are missing:** check Java package scope,
-  compiled line information and the source checkout. It must match the running build.
-- **Traces vanished:** live data is kept in bounded JVM memory. Save important
-  evidence before restart or eviction. A saved view preserves filters, not traces.
-- **A dependency has no detailed trace:** its caller-side boundary may be visible
-  without a receiver agent; that does not mean its execution was fully captured.
+- **No matching request:** increase time, check API admission/package scope and
+  run **Check capture readiness**. Viewer filters do not change capture settings.
+- **Missing upstream/receiver:** check scope, propagation, connection and retention.
+  Restart after config/agent changes and reproduce; old saves stay partial.
+- **No source/methods:** check level, packages, debug metadata and matching checkout.
+  Overview intentionally has no method/line history.
+- **Traces disappeared:** restart, TTL and eviction can remove bounded JVM data.
+  Save important evidence promptly.
+- **Need setup changes:** reopen `sh setup.sh`; saved and active settings differ
+  until the intended JVM is restarted and a fresh request verified.
 
-Missing evidence does **not** prove dead code or a safe change. Keep using tests,
-source review and normal logs. Review captures before sharing: paths, identifiers
-and source information can be sensitive.
+For assistant use, configure [Java MCP](java-distribution.md#mcp)
+with the same primary service JSON as the viewer. Ask it to find your API/time
+window, let you choose ambiguous matches, and separate observed facts from guesses.

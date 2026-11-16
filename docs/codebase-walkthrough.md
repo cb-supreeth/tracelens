@@ -38,9 +38,10 @@ The design separates three responsibilities:
 | `tracelens-bridge` | Bootstrap-visible, dependency-free API called from woven bytecode. |
 | `tracelens-core` | Framework-independent trace/event model, lifecycle, bounded store, config, and Jackson JSON exporter. |
 | `tracelens-agent` | Byte Buddy weaving, servlet/async/client/messaging hooks, and standalone store/debug API. |
+| `tracelens-tool` | Current Java setup, CLI, viewer server, federation/source resolution, capture stores and stdio MCP; packaged into the combined JAR. |
 | `tracelens-spring-boot-starter` | Optional Spring Boot/jakarta adapter for HTTP entry, lifecycle wiring, and application-route debug API. |
 | `tracelens-servlet-javax` | Optional Java 8 / Servlet 3.0 adapter: filter, application-route debug API, async lifecycle. No Spring or Chargebee framework dependency. |
-| `tracelens-cli` | Python CLI, local web UI, source renderer, service federation, and MCP server. |
+| `tracelens-cli` | Legacy reader/reference implementation plus shared HTML/CSS/JavaScript assets bundled by the current Java tool. |
 | `samples/line-spike` | Small executable proofs for capture and async propagation behavior. |
 | `samples/standalone-smoke` | Plain Java 8/javax and Java 21/jakarta servlet fixtures; actual single-agent integration checks. |
 
@@ -118,14 +119,17 @@ It does not store events itself. It checks whether a registered sink and an
 active trace context exist, forwards if possible, and otherwise drops the event
 while incrementing diagnostic counters. `emitted` counts calls forwarded to the
 sink, not events successfully retained: a full or evicted store can reject an event.
-The basic line/method/exception callbacks do not catch sink failures. Boundary and
-lifecycle callbacks have explicit failure containment, so “never affects the host”
-is a design aim, not an unconditional guarantee for every callback.
+Line/method/exception callbacks contain observer failures and count them separately;
+method advice also suppresses observer extraction errors. Boundary and lifecycle
+callbacks retain their containment. This does not promise immunity to JVM resource
+exhaustion or every initialization/transport failure.
 
 `TraceContext` keeps the active immutable `TraceSnapshot` in a plain `ThreadLocal`.
 It does not use `InheritableThreadLocal`, because that is unsafe with pooled threads.
-Instead, `wrap(Runnable)` and `wrap(Callable)` capture a snapshot at submission time
-and restore it only for the task execution.
+Explicit `wrap(Runnable)` and `wrap(Callable)` capture a snapshot at submission time
+and restore it only for task execution. Automatic executor instrumentation instead
+uses bounded weak-identity associations on exact `ThreadPoolExecutor` instances,
+preserving the original task/Future and queue semantics.
 
 ## 2. Core: trace model, lifecycle, and retention
 
@@ -175,18 +179,35 @@ separately in the export's `httpCalls` list, not in this line-event stream.
 
 `TraceStore` is a bounded in-memory retention layer:
 
-- retained-segment cap (`maxTrackedRequests`, default 200), evicting the least
-  recently active segment when space is needed
-- global event cap (`maxTrackedEvents`, default 500,000)
+- retained-segment cap (`maxTrackedRequests`, default 200), evicting least-active
+  segments within the eligible channel when space is needed
+- HTTP reservation (`httpRetentionPercent`, default 75): HTTP retains a guaranteed
+  share of the slots; schedulers, SQS consumers and other background entries share
+  the remainder. Either channel can borrow unused **slots**, reclaimed when the
+  other channel needs its share. With 200 slots, background churn cannot displace
+  the last 150 HTTP segments. New HTTP traffic can still replace older HTTP traces.
+- global event cap (`maxTrackedEvents`, default 500,000), split into **fixed** HTTP
+  and background budgets (375,000 / 125,000 at the defaults). Event capacity is not
+  borrowed: this prevents a large background capture or a newly arriving scheduler
+  from evicting HTTP history for event space. Per-event bookkeeping is O(1); scans
+  occur on registration/eviction, not on each line callback. Unused event capacity
+  in one channel is deliberately unavailable to the other.
 - per-segment event cap (50,000)
+- estimated retained-data budgets (`maxSegmentBytes`, default 32 MiB;
+  `maxTrackedBytes`, default 256 MiB), separate from event-count limits
+- reserved capacity for boundaries/exceptions: detail stops before the last
+  512 segment events / 1 MiB and the last 4,096 channel events / 8 MiB store bytes
+  at the defaults; smaller budgets reserve at most 10% instead
 - idle TTL sweeper (default 60 minutes)
 - recording enable/disable switch for new registrations
 - configurable destructive export behavior
 
 Reads do not refresh activity or TTL. HTTP call updates touch activity; ordinary
-event appends do too. The per-segment cap sets `truncated`; hitting the global
-event cap currently drops appends without setting that flag. A false `truncated`
-value therefore does not prove completeness. Disabling recording does not remove
+event appends do too. Segment, channel and global event/byte drops record explicit
+`dropReasons` and truncation/detail-gap metadata. Intentional detail omission is
+also reported; methods-only capture does not count its absent line callbacks as
+lost method evidence. A false `truncated` value still does not prove complete
+application coverage. Disabling recording does not remove
 transformers or stop appends to already-retained segments.
 
 HTTP metadata has a separate cap of 64 calls per segment with bounded fields and
@@ -194,9 +215,20 @@ HTTP metadata has a separate cap of 64 calls per segment with bounded fields and
 ceiling: strings, metadata, active lifecycle state, and transient export copies
 also use memory. Summary size estimates are approximate.
 
+`httpRetentionPercent: 0` restores the previous shared-budget/least-activity policy.
+Nonzero percentages are 1–99, rounded down, with at least one slot/event per channel
+when capacity exceeds one. A one-slot store favors HTTP once HTTP is present.
+Reservation is not a TTL extension, disk persistence, active-request protection or
+a per-endpoint guarantee: idle expiry, explicit resets/destructive exports and
+same-channel churn still remove traces. `/tracelens/summary` (starter) or `/summary`
+(standalone) exposes `httpRetentionPercent` and `retention` with channel counts,
+budgets and lifetime capacity/idle-eviction and budget-drop counters. Updating a
+running agent to this policy requires rebuilding its JAR and restarting that JVM.
+
 This is a local/dev/predev debugging store. Restarting a service loses its retained
-traces. Browser pins are a separate, browser-local snapshot mechanism, not JVM
-retention or a shared backend; see the viewer section below.
+traces. Explicit viewer-file snapshots and minimized CLI captures preserve
+separate local copies; legacy browser pins remain browser-local. None extends JVM
+retention or creates automatic shared history; see the viewer section below.
 
 ### Lifecycle and sink
 
@@ -222,6 +254,24 @@ scope in standalone mode. It does not discover `tracelens.json` from the working
 directory. It injects the bridge jar into the bootstrap classloader, creates
 package/exclusion matchers, and installs Byte Buddy transformers.
 
+The selected service JSON also owns `httpIncludePaths`, alongside packages,
+identity hooks and retention. HTTP entry selection uses literal path-or-descendant
+prefixes, not wildcard matching. Omission retains the generic `["/"]` default;
+explicit `[]` disables retained HTTP entries, and built-in ignored paths still
+apply. Launch scripts select the JAR/config path/debug port instead of maintaining
+a second HTTP allowlist. Configuration is read at startup and needs an app JVM
+restart; the viewer cannot hot-reload it. See the
+[cb-app migration rules](cb-app-integration.md#one-json-file-for-capture-settings)
+for safely converting older managed startup lists.
+
+`captureMode` has three levels: `overview` retains supported boundaries/outcomes,
+`methods` adds scoped method entry/exit, and `detailed` adds line events.
+`detailedCapturePaths` narrows method/line retention to selected paths;
+`detailedCaptureUntilEpochMillis` falls back to overview after the window ends.
+The existing method/exception switches still apply. These are runtime retention
+checks before detail allocation, not dynamic removal of woven callbacks. SQL,
+bindings and incoming request data have independent opt-ins in every level.
+
 Without a config file, the agent's `applicationId` fallback is `cb-app`; override
 it with `-Dtracelens.applicationId` for a different service. A config file must
 still supply an identity, either in JSON or through that JVM override. For the
@@ -245,19 +295,31 @@ that source line finished successfully.
 `MethodTraceAdvice` adds method entry/exit/exception callbacks according to config.
 With both tracking options enabled, normal returns emit `METHOD_EXIT`; exceptions
 escaping a method emit `EXCEPTION` instead. An internally caught exception is not
-itself an exceptional exit. Names contain no method descriptor, so overloads are
-not uniquely identified by name alone.
+itself an exceptional exit. New events include a JVM method descriptor and a
+runtime-local thread token. Old name-only captures remain readable but cannot
+uniquely identify overloads or same-named threads.
 
 The application transformer acts at class load; it does not retransform already
 loaded business classes. The exposed `agentmain` entry point is not a guarantee
 of complete late-attach capture. Use startup `-javaagent` and restart after an
 agent upgrade. Separate infrastructure transformers do use retransformation.
 
-Executor hooks cover `ThreadPoolExecutor.execute` and supported scheduling methods
-on `ScheduledThreadPoolExecutor`; servlet hooks also wrap `AsyncContext.start`.
-They do not universally cover raw threads, ForkJoin/common-pool work, reactive
-pipelines, or arbitrary custom executors. Scoped `@Scheduled` methods can create
-synthetic job traces. Scoped routing datasources emit pool-choice markers, and
+Executor hooks cover exact `ThreadPoolExecutor` instances with unchanged tasks;
+servlet hooks also wrap `AsyncContext.start`. Scheduled/custom executors, raw
+threads, ForkJoin/common-pool work and reactive pipelines need explicit context
+propagation. Unsupported or ambiguous automatic associations are skipped, not
+guessed. Scoped `@Scheduled` methods can create
+synthetic job traces. Separately,
+[`ChargebeeJobInstrumentation`](../tracelens-agent/src/main/java/com/chargebee/tracelens/agent/ChargebeeJobInstrumentation.java)
+matches the exact `AppJobExecutor.exec(SchJob, Long)` dispatcher and audit seam,
+independent of application package scope. A nonempty `chargebeeJobTypes` allowlist
+selects runtime job types; each selected dispatch gets a separate scheduler root,
+not an inferred child of the API that scheduled it. Recognized audit outcomes
+determine success/failure/skipping; normal return alone does not prove success.
+The hook is independent of `instrumentScheduled` and `httpIncludePaths`, but
+method/line evidence still needs scoped packages. See
+[custom-job configuration and limits](cb-app-integration.md#capture-a-chargebee-custom-scheduled-job).
+Scoped routing datasources emit pool-choice markers, and
 configured wrapper classes emit method-entry markers, not confirmed network calls.
 
 See [the Byte Buddy guide](byte-buddy-instrumentation.md) for the detailed weaving
@@ -271,6 +333,12 @@ weaves JDK `HttpURLConnection`/HTTPS in standalone mode, independently of packag
 scope. Under an active trace, it records sanitized peer/path, method, local timing,
 status/error, and propagation outcome. Timing stops at response headers/error/
 disconnect, not streamed-body completion. This is not coverage of all HTTP clients.
+
+The separate Apache adapter covers synchronous HttpClient 4 `InternalHttpClient`
+and `MinimalHttpClient` seams, with one logical operation through response
+headers/error. It has guarded host/port propagation and nested-overload
+deduplication; Apache 5/async and arbitrary client chains are not covered. See
+[HTTP adapter contracts](distributed-tracing.md#apache-httpclient-4).
 
 Observation and propagation are separate switches:
 
@@ -356,48 +424,68 @@ automatically install those starter contributors.
 
 ## 5. CLI, UI, and MCP
 
-The focused productivity path also lives entirely in this reader layer:
-[`doctor.py`](../tracelens-cli/tracelens_cli/doctor.py) checks setup;
-[`investigation.py`](../tracelens-cli/tracelens_cli/investigation.py) selects an
-API/scenario without silently choosing an ambiguous request;
-[`captures.py`](../tracelens-cli/tracelens_cli/captures.py) projects, persists and
-compares bounded evidence; and
-[`workflow.py`](../tracelens-cli/tracelens_cli/workflow.py) shares orchestration
-between CLI and MCP. Saved comparisons do not need a live JVM. These files add
-no instrumentation or database; see the [developer workflow](developer-workflow.md).
+The current distribution runs this layer with `java -jar tracelens.jar` in a
+separate JVM, not inside the application agent. `tracelens-tool` contains
+`ToolMain`, `ViewerServer`, `McpServer`, `Federation`, `Visualization`, `Execution`,
+`Source`, `ViewerSnapshotStore`, `CaptureStore` and `SetupInstaller`.
+The shared browser assets live under `tracelens-cli/tracelens_cli/web/` and are
+embedded in the Java JAR; their directory name does not imply a runtime dependency.
+For current invocation/setup contracts, see [Java distribution](java-distribution.md).
+
+Setup prepares cb-app, EMS, Plans, Ledger or GO independently. Reruns load/edit
+capture settings with backups; additions preserve unrelated settings and saved
+namespaces. Per-service failures are isolated, and the viewer also keeps healthy-service evidence when another
+agent is unreachable. Saving configuration does not restart applications; a
+separate confirmed action manages registered Tomcat/JAR children without adopting
+IDE/custom processes. Setup does not build applications. UI middleware
+is not an installer option.
+
+The productivity path lives entirely in this reader layer: `Doctor` checks setup,
+`GuidedInvestigation` checks exact API capture readiness, and `Investigation`
+selects evidence without silently choosing an ambiguous request. `Captures`,
+`CaptureTools` and `BehaviorComparison` project, search and compare saved
+evidence; `Workflow` shares orchestration between CLI and MCP. Saved comparisons
+do not need a live application JVM. This layer adds no instrumentation or database;
+see the [developer workflow](developer-workflow.md).
 
 The implemented entry points are:
 
 | CLI | MCP | Purpose |
 | --- | --- | --- |
 | `doctor` | `tracelens_doctor` | Read-only setup, scope, source-root and retention checks; never starts/restarts services or changes recording. |
+| `diagnose` | `diagnose_capture_request` | Read-only exact-path capture checks and retained matches; missing metadata remains unknown, not an inferred readiness pass. |
 | `investigate` | `investigate_request` | Select a retained request by API path, scenario label or exact trace ID; return ambiguity instead of guessing by default. |
 | `capture save` | `save_request_capture` | Explicitly save a bounded local evidence projection before eviction or restart. |
 | `capture list` | `list_request_captures` | List those local files without fetching live service evidence. |
 | `capture compare` | `compare_request_captures` | Compare two saved IDs or unique exact names offline. |
+| `capture search` | `search_saved_captures` | Bounded literal lookup of classes, methods, exception types and destinations in minimized capture files only. |
 
 The request investigation preserves sibling/downstream segments when a filter
 matches one segment. Its failure signals are evidence to inspect, not an automatic
 root-cause finding. Choosing the latest match requires explicit `selection=latest`.
+The viewer's **Start an investigation** panel uses the same readiness checks.
+Its explicitly armed 60/120-second watch waits for one new, completed, unambiguous
+request, then saves a viewer snapshot. It does not replay APIs, broaden recording
+scope or change the agent. Ambiguity and incomplete discovery stop selection.
 
-Key files:
+`DebugClient`, `Federation`, `Renderer` and `Source` read evidence, render call
+trees and resolve observed `FQCN + line` coordinates against a configured local
+checkout—no embeddings or code index are required. The retained
+[legacy reader](../tracelens-cli/tracelens_cli/) and its tests remain technical
+references, not a prerequisite for the Java distribution.
+Native request-body/query and ClickHouse capture are separate
+agent opt-ins documented in [request data and native SQL](request-data-and-clickhouse.md).
+The UI exposes Requests, Saved captures, Performance and Services/capture settings.
+Fixed-size graph cards open an adjacent inspector for inputs, SQL and Copy actions;
+focus controls and a bounded minimap help navigate large flows without resizing
+cards. Request-data keyword search is explicit and bounded. Grouped SQL, cache
+and queue cards retain their own evidence semantics; compact/fit defaults and call-order labels are explained
+in [hybrid visualization](hybrid-visualization.md).
 
-- [cli.py](../tracelens-cli/tracelens_cli/cli.py)
-- [client.py](../tracelens-cli/tracelens_cli/client.py)
-- [render.py](../tracelens-cli/tracelens_cli/render.py)
-- [source.py](../tracelens-cli/tracelens_cli/source.py)
-- [server.py](../tracelens-cli/tracelens_cli/server.py)
-- [mcp_server.py](../tracelens-cli/tracelens_cli/mcp_server.py)
-
-The Python CLI calls the debug API using the standard library. `render.py` turns a
-timeline into a readable call tree with thread lanes, relative times, loop-collapse,
-and source lines. `source.py` resolves exact `FQCN + line` coordinates against a
-local checkout—no embeddings or code index are required.
-
-`tracelens serve` launches a local `127.0.0.1` bridge that serves the vanilla
+`java -jar tracelens.jar serve` launches a local `127.0.0.1` bridge that serves the vanilla
 JavaScript timeline UI and proxies the service debug API.
 
-`tracelens mcp` starts a stdio JSON-RPC MCP server for compatible clients such as
+`java -jar tracelens.jar mcp` starts a stdio JSON-RPC MCP server for compatible clients such as
 Cursor. For lower-level single-service inspection, use progressive disclosure:
 
 ```text
@@ -418,22 +506,50 @@ provides `find_actions`/`get_action`, `find_distributed_traces`/
 `get_distributed_trace`, `get_trace_visualization`/`show_trace_visualization`,
 `get_segment_execution`, and error grouping tools. It uses non-destructive exports.
 
-[`services.py`](../tracelens-cli/tracelens_cli/services.py) federates an explicit
-local service registry on demand; it is not a collector. The flow graph separates
+`Federation` reads an explicit local service registry on demand; it is not a
+collector. Its bounded shared admission pool isolates partial/unavailable services.
+The flow graph separates
 caller boundaries from linked receiver execution. The per-segment execution model
 reconstructs observed method nesting and source context, with output bounds and
 warnings for incomplete events. It is not a complete static call graph or an
 automatic changed-method impact index.
 
-The viewer can save filter views and pin snapshots containing the graph and
-captured segment data in browser IndexedDB. Current pin limits are 20 snapshots,
-5 MiB each, 20 MiB total, subject to browser quota. A successful pin can outlive a
-service restart, but it does not protect the JVM copy from eviction, capture
-future events, or create a shareable backend record. Pins are browser-local and
-are not accessible to MCP. Missing/partial pinned data is reported rather than
-silently replaced with live data.
+The segment detail page offers **Code flow**, **Call tree** and **Timeline / source**.
+`web/app.js` sends an allowlisted loaded projection or an exact paged segment
+reference to `POST /api/segment-execution`. `ViewerServer` uses the same `Execution`
+model builder as MCP. Live paged reads are bounded; saved reconstruction reads
+only the selected saved evidence, never live replacement data or a newer checkout.
+`web/execution-graph.js` renders bounded HTML
+cards/SVG nesting connectors with zoom, collapsed subtrees and source-event
+drill-down; `web/code-flow.js` provides the complementary ordered code-flow view.
+Both support search over retained reconstructed nodes, match navigation and a
+selected-branch focus that preserves observed ancestry. Code flow can reversibly
+fold wrappers into an application-logic view; it does not delete observations.
+Unplaced HTTP has a separate labeled search section, never invented method
+ownership. Omitted/raw events are not silently added to model search. **Open local
+source** explicitly resolves an existing observed coordinate under the configured
+source root and offers editor links; it does not execute a server shell or prove
+that today's checkout matches the captured build. HTTP observations stay separate
+when method ownership is unknown.
+This is viewer-only computation: no Java instrumentation or runtime dependency
+is added. See [bounds and evidence rules](hybrid-visualization.md#segment-execution-flow).
 
-Explicit CLI/MCP file captures are separate from these pins. They default to
+**Save snapshot** uses `ChunkedSnapshotStore` for upgraded agents: the server
+captures bounded pages and pinned source into a version-2 manifest/compressed
+chunks under `~/.tracelens/viewer-snapshots/<namespace>/chunked-v2`.
+`serve --snapshot-dir` overrides the root. Limits are 20 captures, 128 MiB raw /
+64 MiB compressed each, and 512 MiB raw / 256 MiB compressed per namespace's
+chunked store. Legacy version-1 JSON snapshots remain supported separately at
+20 files, 5 MiB each and 20 MiB total. Full stores reject saves rather than
+silently evicting evidence. See [paging, concurrency and all quotas](java-capture-storage.md).
+Stable snapshot
+links work across browsers using the same viewer and storage, even after service
+restart, but are not public links. Missing/partial data is reported rather than
+silently replaced with live evidence. Legacy browser pins remain in IndexedDB;
+**Save to viewer** copies one explicitly, preserving the original. Saved filter
+views remain browser-local.
+
+Explicit CLI/MCP file captures are separate from full snapshots and browser pins. They default to
 `~/.tracelens/captures` or an operator-configured `--capture-dir`, with limits of
 20 captures, 5 MiB per capture and 20 MiB total; a full store rejects saves rather
 than overwriting or automatically deleting existing captures. The projection
@@ -441,6 +557,21 @@ omits payloads, headers, raw exception messages, source text, user/context field
 and thread names. Paths, dependency/code identifiers and supplied labels can
 still be sensitive. A supplied revision is a label, not verified runtime build
 identity, and snapshots are not atomic across services.
+
+The **Saved captures** workspace lets developers choose a Before/After pair for
+**Compare & search saved captures**. Its behavior review leads with request
+outcomes, external calls and parent-level changed methods, with nested changes
+expandable. Service aliases improve labels without changing matching identities;
+comparability gaps remain visible. Evidence inspection preserves the comparison
+pair and return context. Search reads bounded evidence across both local stores;
+large chunked captures use an explicitly limited per-segment analysis prefix,
+not a full historical index. **Use with CLI/MCP**
+creates a new minimized capture from the selected snapshot, leaving the full
+original unchanged. CLI/MCP list/compare/search tools use that new capture ID,
+not the viewer snapshot UUID; they cannot directly read full snapshots or browser
+pins. Configure the same global `--capture-dir` for viewer and CLI/MCP when
+overriding the default. No-result searches and unchanged comparisons do not prove
+unused code or safety; see [workflow limits](developer-workflow.md).
 
 ## 6. Worked request example
 
@@ -510,8 +641,10 @@ append; reflection, exports, source rendering, and graph layout add further work
 Narrow package/path scope and retention limits reduce cost, but no representative
 production overhead benchmark or zero-impact guarantee is established here.
 
-Standalone HTTP and new messaging boundary capture exclude request/message bodies
-and arbitrary sensitive headers. That is not “no sensitive data”: path identifiers,
+Incoming servlet query parameters and supported Tomcat request bodies have separate
+bounded opt-ins; supported SQL and bindings can also be enabled deliberately.
+Message bodies, auth/cookie headers and HTTP responses are not captured. That is
+not “no sensitive data”: request inputs, SQL, path identifiers,
 queue/topic names, user/site/action labels, exception messages, source text, and
 explicitly configured JVM properties can be sensitive. `capturePayloads` is not a
 general redaction control. Protect the local API, viewer, exports, pins, and AI

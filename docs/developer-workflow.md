@@ -1,213 +1,277 @@
 # A focused TraceLens developer workflow
 
-New to TraceLens? Start with the shorter [how-to-use guide](how-to-use.md).
-This page covers the detailed workflow, evidence limits and configuration options.
+Use this workflow for a controlled reproduction: check setup → reproduce → find
+the request → inspect → save → compare. For a first installation or a quick UI
+tour, start with [How to use TraceLens](how-to-use.md).
 
-Implemented in the Python CLI/MCP layer. No new JVM callbacks, database,
-background collector, frontend dependency or application integration is required.
-These tools read agents already attached to the services; they do not launch the
-services, replay API requests or make code changes.
-
-The goal is one useful investigation inside the developer's existing workflow:
-check setup → reproduce → find the request → inspect evidence → save/compare if needed.
-Use the [pilot scorecard](productivity-pilot.md) to check whether this saves time in practice.
+The current distribution is one Java JAR for agent, viewer, CLI, setup and MCP.
+The reader tools do not replay business requests or change application code.
+Use the same primary service JSON for CLI, viewer and MCP so their service/source
+mappings and private evidence directories agree. Examples below run from an
+installation with `cb-app/tracelens.json`; substitute your primary config.
 
 ## 1. Check setup
 
-Install the CLI using the [sharing guide](sharing-and-configuration.md#4-install-the-cliviewermcp).
-For cb-app agent setup and the optional local launcher, use the
-[cb-app integration guide](cb-app-integration.md#optional-makefile-launcher).
-The checkout and service-orchestrator name is `chargebee-app`; the bundled
-TraceLens service/filter name is `cb-app`. Keep those names distinct when
-configuring source paths and selecting captured services.
+Run `sh setup.sh` for a first installation or **Edit capture settings** for a
+managed installation. Select Overview, Methods or Detailed, then review API/package
+scope, detail overrides and independent payload/SQL opt-ins. Saved policy is not
+proof that the running JVM has loaded it. Runtime actions are separately reviewed;
+see [guided setup](guided-setup.md).
 
-The optional launcher is copied into `chargebee-app` as `Makefile.tracelens`.
-Its `check` validates startup wiring; `status` reads the agent summary. `up`
-uses the normal application lifecycle and reuses a healthy JVM, so it does not
-attach an agent to an already-running process. `restart` reloads the built app
-with tracing and jobs enabled and clears existing Tomcat logs. Save relevant
-logs and captures first; the integration guide is the installation source of truth.
+In the viewer, **Services & capture settings** checks current connections and
+explains how to reopen the dashboard; it does not start a configuration server.
+For diagnostics in a terminal:
 
-From the repository root, with `tracelens` available on PATH:
-
-```bash
-tracelens --services scripts/services-local.json doctor
+```sh
+java -jar tracelens.jar --config cb-app/tracelens.json doctor
 ```
 
-For one service:
+`doctor` checks reachability, agent/recording/sink state, instrumentation evidence,
+capture scope, retention and source-directory access. It reports unavailable and
+unknown fields rather than treating them as healthy. Configured, installed and
+transformed adapter states are distinct; transformation does not prove a hook
+ran. Empty stores after restart are normal. A readable checkout does not prove
+it matches the running build.
 
-```bash
-tracelens --url http://127.0.0.1:7778 doctor --source-root /absolute/path/to/service
-```
-
-`doctor` checks debug API reachability, agent/recording/sink status, transformation
-counters, line-capture scope, retention and configured source-directory access.
-It returns actionable suggestions for each service, including offline services.
-Unknown/missing fields are not treated as zero or healthy. Empty stores after a
-restart are normal. It does not enable recording, install dependencies or restart
-anything. A readable checkout is not proof it matches the running build.
-
-The local example registry contains workstation-specific source paths; adapt it
-before sharing. Use debug ports (local cb-app `7778`, EMS `7779`), not the browser
-page URL. In single-service mode the configured alias is `default`, even if the
-application reports `applicationId: cb-app`. An updated source default or config
-does not rename old captures or prove a running JVM loaded a rebuilt agent.
-Each real diagnostic HTTP response is limited to 64 KiB.
+Diagnostics are bounded read-only operations. Slow/offline services are reported
+without discarding healthy peers; the tool does not enable recording, install
+dependencies or restart anything. It is not a performance/privacy certification.
+Use actual configured aliases, such as `cb-app`, rather than the checkout name
+`chargebee-app`.
 
 ## 2. Reproduce and find the request by API
 
-Perform your normal UI action or API call, then:
+The viewer separates **Requests**, **Saved captures**, **Performance**, and
+**Services & capture settings**. In Requests, Live requests, Scheduled jobs and
+Errors have their own meanings and filters. Opening saved evidence does not
+require a running application.
 
-```bash
-tracelens --services scripts/services-local.json --service cb-app investigate \
+For a missing capture, open **Start an investigation**, enter the exact backend
+path and optional method/service/user/site, then **Check capture readiness**.
+Unlike ordinary list substring filters, investigation path/user/site matching
+is exact and case-sensitive within one observed segment. Checks distinguish
+confirmed exclusions from unknowns; current settings cannot explain every earlier
+missing request.
+
+To preserve one fresh reproduction, choose a 60- or 120-second window and **Watch
+next request & save**. Wait for **Watching** before making the request. The watch
+excludes its baseline and saves only one unambiguous new completed request.
+Multiple matches, incomplete discovery or disappearance stop automatic saving.
+Cancel/close/navigation stops future polling; if a save is already in flight,
+check Saved captures. Browser/service clocks must agree.
+
+The read-only check is also available without a watch:
+
+```sh
+java -jar tracelens.jar --config cb-app/tracelens.json --service cb-app diagnose \
+  --path /api/v2/features --method GET
+```
+
+After reproducing, find the request by API or a recorded reproduction label:
+
+```sh
+java -jar tracelens.jar --config cb-app/tracelens.json --service cb-app investigate \
   --method GET --path /api/v2/features --since-minutes 2
+java -jar tracelens.jar --config cb-app/tracelens.json investigate \
+  --label CRI-123 --outcome error
 ```
 
-For a recorded reproduction label:
+The default selection is unique: multiple matches produce candidates, not a silent
+choice or save. Narrow time/path/service/user/label, choose an exact `--trace-id`,
+or explicitly request `--selection latest`. A tied/unknown newest timestamp or
+incomplete discovery still requires review. Other filters continue to apply to an
+exact trace-ID selection.
 
-```bash
-tracelens --services scripts/services-local.json investigate --label CRI-123 --outcome error
-```
+Filters must match one observed segment, but the result keeps that request's
+other observed services. A downstream failure is not hidden by upstream HTTP 200.
+Signals guide investigation; they are not an automatic root-cause diagnosis, and
+summary outcome filters do not inspect every caught exception/client-boundary error.
 
-The default is `--selection unique`. Several matches return `status: ambiguous`
-and a compact candidate list; nothing is silently selected or saved. Narrow the
-time, literal path, service, user or label. If you explicitly mean the latest run,
-add `--selection latest`. A tied/unknown newest timestamp or incomplete discovery
-still needs an explicit choice. `--trace-id TRACE_ID` selects an exact request;
-other supplied filters, including the time window, continue to apply.
+Use the actual backend path: `/d/features/test1`, cb-app's encoded feature API and
+EMS's `/features/test1` are distinct observed paths, not aliases to rewrite.
 
-Filters must match one observed service segment, but the returned investigation
-preserves its request's other observed segments. It includes a small journey,
-failure evidence and suggested next tools. A downstream HTTP failure is not
-hidden by a successful upstream response. Signals are evidence to investigate,
-not an automatic root-cause diagnosis. Summary outcome filtering does not scan
-all raw event streams for caught exceptions or every client-boundary failure.
+### Inspect the selected evidence
 
-Use the backend API path, not the browser route: `/d/features/test1` can trigger
-cb-app `/api/v2/features/dGVzdDE=` and EMS `/features/test1`. These are distinct
-observed paths, not aliases TraceLens should rewrite.
+Open the request graph, select a fixed card and use **Selected evidence**.
+**Open code flow** opens the selected service; **View caller in …** opens upstream
+calling context. SQL groups, request data and source actions stay in the inspector
+without resizing graph nodes. Unknown locations are not guessed.
 
-The result caps candidate and graph output. Existing live federation reads still
-fetch retained summary lists and selected exports before projection; display
-limits are not universal upstream byte limits.
+Use **Code flow** for reading, **Call tree** for nesting and **Timeline / source**
+for retained events. Timeline controls stay pinned, rows can wrap, and selecting a
+row opens retained event JSON with a Copy action. Event paging and source jumps
+preserve exact segment/instance identity. Missing saved evidence never falls back
+to a live service. See [visualization rules](hybrid-visualization.md).
 
 ## 3. Save baseline and candidate evidence
 
-Save **before restarting** the baseline JVM:
+Save the baseline before restarting its JVM. Record equivalent inputs/application
+state and a known build label; a snapshot name alone is not build provenance.
 
-```bash
-tracelens --services scripts/services-local.json --service cb-app capture save features-before \
+```sh
+java -jar tracelens.jar --config cb-app/tracelens.json --service cb-app capture save features-before \
   --method GET --path /api/v2/features --since-minutes 2 --selection latest \
   --revision baseline-build
 ```
 
-Make the code change, rebuild/restart as needed, reproduce with equivalent inputs
-and application state, then save a separate candidate:
+Change the application, rebuild/restart as necessary and reproduce comparable
+inputs. Save the candidate separately:
 
-```bash
-tracelens --services scripts/services-local.json --service cb-app capture save features-after \
+```sh
+java -jar tracelens.jar --config cb-app/tracelens.json --service cb-app capture save features-after \
   --method GET --path /api/v2/features --since-minutes 2 --selection latest \
   --revision candidate-build
-
-tracelens capture list
-tracelens capture compare features-before features-after
+java -jar tracelens.jar --config cb-app/tracelens.json capture list
+java -jar tracelens.jar --config cb-app/tracelens.json capture compare features-before features-after
 ```
 
-`--revision` is an explicit build label, not a claim that the current Git HEAD is
-the artifact running in the JVM. Use the known build/revision and record any
-uncommitted changes yourself. The label starts with a letter/digit and accepts
-letters, digits, dots, slashes, underscores and hyphens (up to 128 characters).
-Snapshot comparison is offline: the services can
-be restarted or stopped after both captures are saved.
+Names can repeat; use the returned capture ID when a name is ambiguous. New saves
+never overwrite or automatically evict prior captures. `--revision` is a supplied
+label, not proof of which artifact ran; record uncommitted changes separately.
+Comparison works offline after both captures are saved.
 
-Captures use generated IDs. Names can repeat; an ambiguous name requires its
-exact `captureId` from `capture list`. Existing files are never overwritten or
-automatically evicted. A quota error requires intentionally archiving/removing
-unneeded files, or choosing another explicit capture directory.
+### Compare viewer snapshots and use them with CLI/MCP
 
-### What is compared
+For the visual workflow, **Save snapshot** on each request. In **Saved captures**,
+select the Before capture first and After second, then **Compare selected**.
+Alternatively open **Compare & search saved captures → Compare snapshots**.
+Review the selected pair and choose **Compare saved snapshots**.
 
-- Observed methods and counts, keyed by service, class and method name.
-- Observed line markers and counts; line-number movement is **not** source-aware mapping.
-- Bounded observed nesting and external dependency evidence.
-- Captured outcomes and local timing observations, with evidence-quality warnings.
+**Behavior review** starts with paired response outcomes and changed external
+calls, then method observations. For example, a 404 → 200 response and a before-only
+EMS call are separate observed facts; they do not by themselves prove the new guard
+intentionally skipped that call. Select a finding to inspect both sides and open
+the exact saved service invocation. **Back to comparison** restores the comparison
+context and inspection position.
 
-“No longer observed” does **not** mean removed or dead code. Method overloads are
-not distinguished by the current event format. Scope differences, input changes,
-missing services, active requests, truncation and unreported global event drops
-can all change the evidence. One timing difference is not a performance benchmark.
-There is no automatic changed-method-to-all-workflows index or guarantee of a
-change's complete impact.
+**Changed methods** shows the outermost supported recorded parent by default.
+Expand nested differences to inspect children. A parent whose counts stayed equal
+can contain changed children; this is not a claim its implementation changed.
+Missing, conflicting, shared or recursive parent relationships remain separate.
+Grouping changes presentation, not the raw method totals.
+
+External-call headings use exact per-caller `dependencyAliases` from the current
+viewer configuration, with the recorded address underneath and caller separate.
+Unknown/ambiguous mappings keep their addresses. Labels are configured display
+hints, not proof of captured receiver execution or historical service ownership.
+They do not change correspondence, raw identities or saved files.
+
+HTTP correspondence uses captured caller, destination, method and literal path;
+status is compared separately. Different concrete paths are not automatically
+aligned as one route. The review is paired evidence, not a merged chronological
+graph. **All differences** retains the detailed method/line/nesting/count report.
+
+Check **Before interpreting changes** for capture completeness, input/scope and
+build/provenance gaps. “No longer observed” is not removed/dead code; line-number
+movement is not source-aware alignment, and one local timing sample is not a
+benchmark. New event descriptors improve overload precision where recorded;
+legacy name-only evidence stays less precise.
+
+**Find in these two captures** filters the returned findings, including grouped
+child methods and configured external-call names/addresses. **Search both saved
+files** performs a separate bounded search of that pair, including retained
+projection evidence omitted from the compact comparison. Methods, services and
+captured API paths are searchable, not query values or request bodies. This is
+not unlimited full-file analysis: read projection/response omission counts.
+
+To use a viewer snapshot through CLI/MCP, expand **Use with CLI/MCP** and choose
+**Create CLI/MCP capture**. This explicitly creates a new minimized copy, omitting
+source, payloads/headers, user/context and raw exception messages. The full snapshot
+is unchanged. Browser-only pins first need **Save to viewer**. The primary JSON's
+`viewer.captureDir`, or an explicit global `--capture-dir`, must agree across
+viewer, CLI and MCP. There is no automatic synchronization.
+
+### Find code in current and saved evidence
+
+Code flow defaults to **Application logic**. Recognized framework/proxy wrappers
+and synthetic accessors are reversibly folded; ordinary getters, incomplete calls
+and exception branches stay visible. Use **Reveal** or **All recorded calls**.
+Both Code flow and Call tree search retained class/method names, exception types
+and destinations, including collapsed nodes. Previous/Next or Enter/Shift+Enter
+reveals ancestors; `/` focuses search. **Focus selected branch** retains observed
+ancestors/descendants; **Clear search / focus** restores the prior view.
+
+Model search covers at most 200 validated nodes within 16 displayed levels, not
+every retained event. Code flow's separate **HTTP observations** search covers
+destination/path/status for at most 5,000 unplaced entries, paged 20 at a time;
+it does not invent a method owner. Timeline pages can retain events beyond the
+execution model, but neither view restores uncaptured/evicted evidence.
+
+**Open local source** uses a known class/observed line under the configured source
+root to offer editor links or Copy path. It does not execute a server-side shell,
+verify the checkout against the build or restore historical source. **Show source
+in timeline** is the separate recorded-evidence action.
+
+In Saved captures, **Search saved evidence** searches viewer files and minimized
+CLI captures on demand. CLI/MCP search reads only the minimized store:
+
+```sh
+java -jar tracelens.jar --config cb-app/tracelens.json capture search FeatureService \
+  --category class --limit 50
+```
+
+Categories are `class`, `method`, `exception` and `destination`; omit for all.
+Queries are literal, case-insensitive and at most 128 printable characters.
+Results default to 50; CLI accepts 1–100. Saved search inspects at most 40 files,
+with a 200,000-event aggregate projection budget and 128 KiB result budget.
+Chunked files have additional bounded-prefix analysis limits. A miss is not
+proof of unused code, complete coverage or change safety.
 
 ## 4. Use the same workflow through MCP
 
-Reconnect the MCP process after upgrading. To choose the local capture directory,
-add the global launch option **before** `mcp`:
+Launch the combined JAR with the primary service JSON; reconnect after upgrading:
 
-```bash
-tracelens --services /absolute/path/services.json \
-  --capture-dir /absolute/path/private-tracelens-captures mcp
+```sh
+java -jar tracelens.jar --config /absolute/path/install/cb-app/tracelens.json mcp
 ```
-
-The existing MCP connection exposes five additional tools:
 
 | Tool | Purpose |
 | --- | --- |
-| `tracelens_doctor` | Read-only setup checks and suggestions |
-| `investigate_request` | API/scenario discovery, ambiguity handling and compact evidence |
-| `save_request_capture` | Explicitly persist one selected run under a human name |
-| `list_request_captures` | List saved local runs, offline |
-| `compare_request_captures` | Compare two capture IDs or unique exact names, offline |
+| `tracelens_doctor` | Read-only per-service setup checks |
+| `investigate_request` | API/scenario discovery with ambiguity handling |
+| `diagnose_capture_request` | Exact-path admission/retention checks, without watch/save |
+| `save_request_capture` | Explicitly persist one selected run |
+| `list_request_captures` | List minimized local captures offline |
+| `compare_request_captures` | Compare two IDs or unique names offline |
+| `search_saved_captures` | Bounded search of minimized saved evidence |
 
-Example prompts for an assistant connected to TraceLens:
+Example:
 
-> Check whether TraceLens is ready for cb-app and EMS. Explain any setup issues;
-> do not restart or change anything.
+> Find my GET /api/v2/features request from the last two minutes. Let me choose if
+> several match. Explain recorded service calls and failures, inspect relevant
+> code, and distinguish observed facts from hypotheses. Do not restart anything.
 
-> I just reproduced GET /api/v2/features in cb-app. Find it within the last two
-> minutes. If there is more than one request, show me the candidates. Explain the
-> observed service path and any failure evidence, then inspect only relevant code.
-
-> Save the latest matching features request as features-before, with revision
-> baseline-build. After I reproduce the changed build, save features-after and
-> compare them. Separate observed changes from unknown coverage and potential
-> effects inferred from source.
-
-The assistant can carry IDs between tool calls; developers do not have to copy
-them manually. Saving is an explicit local write, not an automatic side effect
-of investigation. Compare/list accept saved names/IDs only, not arbitrary files.
-Use existing graph/execution tools for visualization; no new dashboard is required.
+The assistant can carry IDs between tools. Saving is an explicit local write,
+not a side effect of investigation. Use the graph/execution tools for deeper
+evidence; follow your team's data policy before sending source or traces to a client.
 
 ## Storage, privacy and cost
 
-Default snapshot directory: `~/.tracelens/captures`; override using the global
-`--capture-dir`. This is separate from browser IndexedDB pins. MCP cannot read
-browser pins, but it can list/compare these explicitly saved local snapshots.
-CLI and MCP must use the same directory to share captures.
+Full viewer snapshots and minimized CLI/MCP captures are separate stores.
+Guided setup configures private paths in the primary JSON. Defaults are
+`~/.tracelens/viewer-snapshots/<namespace>/` and `~/.tracelens/captures`;
+`serve --snapshot-dir` and global `--capture-dir` override their respective roots.
 
-The file store currently requires a POSIX filesystem (macOS/Linux). Its directory
-must be owned by the developer and private (`0700`); newly created directories
-and files use private permissions. Symlinked paths are rejected. Limits are 20
-captures, 5 MiB per capture and 20 MiB total; snapshots process at most 16 segments
-and 100,000 events in aggregate. Comparisons are capped at 64 KiB with explicit
-omission counts. These bounds are evidence budgets, not completeness guarantees.
-The snapshot-building stage also limits each agent response to 8 MiB, aggregate
-reads to 32 MiB and requests to 64. These limits do not apply retroactively to the
-preceding request-selection step, which uses the existing live discovery/journey
-reads described above.
+Current paged viewer saves use version-2 compressed chunks: 20 captures,
+128 MiB raw / 64 MiB compressed each, with 512 MiB raw / 256 MiB compressed store
+quotas. The version-1 viewer store and minimized CLI store retain their separate
+20-file, 5 MiB/file and 20 MiB/store limits. Existing evidence is not rewritten.
+**Download capture archive / Import capture archive** shares a version-2 ZIP as
+a new saved ID; it does not replay the request or contact original services.
 
-Snapshots persist a bounded projection, not a complete raw trace: no request
-payloads, logged-in identity, source text or raw exception messages. Paths,
-class names, queue/topic names and your labels can still be sensitive. Review
-files before sharing; local file permissions are not team RBAC or encryption.
-The raw export is read in memory before projection, so this is not a guarantee
-that sensitive data never passes through the local Python process.
+Minimized captures process at most 16 segments and 100,000 events in aggregate;
+comparison output is capped at 64 KiB. Version-2 offline analysis reads a bounded
+prefix with explicit per-segment coverage, not every chunk regardless of size.
+Full saved evidence can therefore outlive the smaller analytic projection.
+See [storage and read limits](java-capture-storage.md) for exact budgets,
+publication/locking and private POSIX-directory requirements.
 
-On-demand reads incur agent export/serialization and Python processing costs.
-No new callbacks or always-on collection were added to the application. This
-does not measure or eliminate the overhead of the existing instrumentation.
+Raw request data, SQL, bindings and source can be sensitive. Even minimized files
+retain identifiers, paths and labels; local permissions are not team access control
+or encryption. Review before sharing. Paged reads reduce individual transfer/render
+size but do not make instrumentation, exports or analysis free.
 
-CLI exit codes: `0` for successful selection/save/list/compare or ready setup,
-`1` for execution/configuration errors or non-ready setup, `2` for an investigation
-or save needing a narrower selection/no retained match. A doctor report can be
-ready for capture while still reporting nonblocking warnings.
+CLI exit codes are 0 for completed successful operations/ready setup, 1 for
+execution/configuration errors or non-ready setup, and 2 for ambiguous/no-match
+investigation/save selection. A completed diagnosis can report no retained match,
+and ready setup can still carry nonblocking warnings.

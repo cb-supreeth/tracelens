@@ -1,311 +1,254 @@
 # Request-flow, source timeline and execution visualization
 
-TraceLens owns the deterministic request-flow model and renderer. A developer can
-inspect that model in the local viewer, or ask an MCP client to retrieve it and
-explain it. Compatible MCP Apps hosts can display the same renderer inside chat.
-Clients without that capability still receive text and Mermaid diagram source.
+TraceLens renders retained execution evidence in complementary views. None is a
+global latency waterfall, a complete call graph or a deployment architecture map.
 
-This is a request-level causal diagram, not a global latency waterfall, a complete
-method invocation tree, or an aggregated architecture/dead-code graph. The
-bounded observed-invocation model below is a separate implemented MCP tool;
-complete execution coverage and aggregated dead-code analysis are not provided.
-
-## Choose the right view
-
-| View | Current entry point | What it establishes |
+| View | Open it | What it shows |
 | --- | --- | --- |
-| Request-flow diagram | Viewer **Flow diagram**; MCP `get_trace_visualization` / `show_trace_visualization` | Observed service segments and local dependency boundaries, with explicit captured links. Receiver agents are needed for receiver execution, not for a supported caller-side boundary. |
-| Segment/source timeline | Viewer **Open segment sources** / **Service details**; MCP `get_flow` | Recorded events in one segment, enriched with local checkout lines when available. Not a full source repository or global waterfall. |
-| Observed invocation model | MCP `get_segment_execution` | Reconstructed method nesting and thread-name lanes for one segment. Returns data for the client to visualize; no built-in viewer diagram or automatic host rendering. |
+| Request flow | Open a request's **Flow diagram** | Captured service invocations and supported local dependencies with explicit links |
+| Code flow | Select a service card → **Open code flow** | Compact reader for one invocation's observed method nesting |
+| Call tree | Select **Call tree** in that service | The same bounded invocation model as a diagram |
+| Timeline / source | Select **Timeline / source** | Retained events and available source lines for one invocation |
 
-These are complementary views of retained evidence, not alternative capture
-engines. The [use-case guide](use-cases.md) connects them to debugging and
-change-impact workflows.
+Start in **Requests** for live retained work or **Saved captures** for fixed
+evidence. Performance analysis and service/setup checks have their own workspaces.
+See [request discovery](request-focused-ui.md) and [use cases](use-cases.md).
 
 ## Use it in the viewer
 
-1. Find a request by API, service and time, then open it.
-2. The **Flow diagram** shows captured service segments, outgoing HTTP calls and
-   external/queue boundary observations. A caller-side boundary can remain
-   visible when the receiver has no agent; its internal execution is not shown.
-3. Select a node for its raw API path, local duration, status and identifiers.
-4. For a service node, choose **Open segment sources** to inspect captured execution.
-5. Switch to **Service details** for the existing nested inspector.
+1. Open the request. The graph starts fitted with unambiguous linked HTTP hops
+   hidden, leaving service connections and grouped local dependencies.
+2. Select a fixed-size card. The adjacent **Selected evidence** inspector holds
+   SQL, request data, boundary details and navigation actions; expanding details
+   does not resize cards or rearrange the graph.
+3. Choose **Open code flow** for the selected service's execution. Choose **View
+   caller in …** to inspect the upstream context instead. If several callers are
+   linked, select the specific recorded call.
+4. Use **← request flow** to return. **Service details** provides the alternative
+   nested segment inspector.
 
-Within a segment, **Observed external boundaries** summarizes HTTP, queue
-publish/consume, configured external-wrapper and DB-route metadata above the
-timeline. **Timeline view → External boundaries and exceptions only** displays
-`EXTERNAL_CALL`, `DB_ROUTE` and `EXCEPTION` events without line/method noise.
-HTTP observations remain in the boundary table because they are captured
-separately from the event timeline. This is a display filter, not a capture
-setting or a query for previously unrecorded network operations.
+**Fit**, zoom and **100%** remain outside the scrolling canvas. **Focus selected**
+centers the card; **Focus branch** fits it and its recorded descendants. The
+minimap shows the viewport, not additional evidence. Arrow keys change selection,
+Enter/Space activates a focused control and Escape closes the inspector. Opening
+the graph or changing HTTP-hop mode fits it; inspecting details preserves the
+chosen camera. The inspector adapts to narrow screens without growing the graph.
 
-**Copy request link** produces a `#trace=...` deep link to this configured viewer.
-It is a reference to live retained evidence, not a durable capture or a link that
-automatically works on a colleague's machine. **Download graph JSON** saves only
-the bounded visualization model; it does not include execution events or source
-files. Paths and service identities can still be sensitive.
+### HTTP hops, frames and service names
 
-Pins created by the current viewer retain the diagram model alongside retrieved
-service data, so viewing that saved diagram does not require a live service.
-Older pins, or captures for which discovery could not supply a matching diagram,
-remain accessible through
-**Service details**. A saved diagram is never silently replaced with live data.
-Browser pins remain browser-local and are not accessible to MCP.
-They are bounded, potentially partial point-in-time snapshots, not an atomic
-distributed capture or permanent server retention; see
-[snapshot limits](request-focused-ui.md#saved-views-and-pinned-snapshots).
-The separate CLI/MCP named-capture workflow saves bounded local JSON for offline
-list/compare. It does not import browser pins or make saved capture IDs valid
-inputs to the live `get_trace_visualization` / `get_segment_execution` tools.
+**Show HTTP hops** reveals caller-side HTTP cards. **Hide HTTP hops** folds only
+an unambiguous owner → HTTP → captured-receiver link into a direct connection.
+Caller and receiver timing/evidence remain distinct; folding does not remove
+canonical nodes from exports or merge calls that share a service name.
+
+A frame groups one captured invocation with its explicitly owned local
+observations. Two Ledger calls keep separate APIs, SQL and source links. Repeated
+frames show their API to distinguish them. Frames do not claim database ownership
+or complete service architecture; ambiguous/shared/cyclic relationships use a
+conservative layout instead of guessed ownership.
+
+When receiver execution is unavailable, a dashed **External service** card remains
+outside its caller's frame, even in compact mode. A configured destination alias
+takes precedence. Otherwise a unique service observed at that exact peer in the
+same capture can supply a labelled naming hint. Unknown/ambiguous peers retain
+their address; inspect the original peer and naming evidence. A name does not
+create a receiver segment or prove historical ownership. No live lookup is used
+to enrich saved evidence.
+
+HTTP arrow numbers express supported causal/local stages: **1, 2, 3** for a
+chain; **1.1, 1.2** only for positively overlapping caller-local intervals.
+Sibling arrows alone are not proof of parallel work. **?** means order is unknown.
+Service clocks are not compared; these labels are not a synchronized timeline.
+Showing/hiding a hop preserves its stage. Grouped DB calls have no single
+execution position and are not numbered.
+
+### Inspect dependencies and request data
+
+Select a dependency card, then inspect its evidence in the side panel:
+
+- Purple **DB CALL** groups retained JDBC or native ClickHouse executions by their
+  captured owner and destination. Choose an execution for query text, local timing,
+  outcome and optional bindings. **SQL with captured values** is a reconstruction,
+  not the original driver statement; unknown/truncated types remain placeholders.
+- **DB routing decisions** count route/pool selections, not queries. The inspector
+  lists individual event/thread observations and their separate caller actions.
+- Cyan **CACHE CALL** is an explicit client boundary. **CACHE ACCESS** is a recorded
+  known cache-wrapper fallback, not proof of network activity. Neither establishes
+  a hit/miss; a human snapshot label is not runtime evidence.
+- Orange queue publish/consume evidence is local. **SUBMITTED** does not establish
+  delivery, consumer completion or transaction commit.
+- A service's **Request data** shows only opted-in retained query/body evidence.
+  SQL, bindings and request data have Copy actions; copying does not sanitize them.
+
+**View calling code** opens the exact owning segment's retained timeline. Where
+supported, it highlights the boundary and reliable nearby instrumented source
+context. This is observed context, not proof of an exact callsite. Missing or
+ambiguous event identity remains unavailable rather than selecting another event.
+For HTTP, **View caller in …** and **Open code flow** deliberately distinguish
+the caller's context from the destination's execution.
+
+**Open local source** offers editor links to the current configured checkout;
+it does not restore historical source. Saved timelines use preserved source and
+never fetch a newer service execution to fill gaps. See [query evidence](jdbc-query-capture.md)
+and [request data / ClickHouse](request-data-and-clickhouse.md).
+
+### Segment execution flow
+
+**Code flow** reads captured methods in separate recorded thread lanes.
+**Application logic** reversibly folds recognized Spring proxies, framework
+invocation wrappers and synthetic accessors. Ordinary getters, incomplete calls
+and branches with exceptions remain visible. **Reveal** restores one folded call;
+**All recorded calls** restores all available calls. Folding preserves parentage,
+children and evidence, and search reveals matching folded calls.
+
+The overview initially shows at most 40 rows/nodes. **Expand all**, **Collapse all**,
+thread filtering and **Show remaining available rows** change presentation only.
+Counts distinguish folded, collapsed, filtered and omitted evidence. Omitted
+model/events cannot be recovered by expanding the UI.
+
+**Call tree** uses the same reconstructed nodes in a nesting diagram. Unlike the
+request graph's fixed cards, this view retains inline method/marker details.
+Selecting one opens thread, outcome, local duration, source coordinates and
+**Show source in timeline**. Subtree controls are separate. Expand/search preserves
+zoom; **Collapse all** fits the remaining roots and **Overview** restores a compact
+two-level view. **Fullscreen** and Escape preserve the embedded diagram state.
+
+Both views search the bounded model's class/method names, exception types and
+boundary fields, including collapsed nodes. **Previous match / Next match** or
+Enter/Shift+Enter reveals ancestors. `/` focuses search; Escape clears search/focus.
+**Focus selected branch** keeps validated ancestors and descendants; **Clear search /
+focus** restores the earlier view without resetting diagram zoom.
+
+The browser searches at most 200 validated nodes within 16 displayed levels.
+Unplaced HTTP calls are not assigned a guessed method owner: **Code flow → HTTP
+observations** has a separate destination/path/status search, with 20 observations
+per page and at most 5,000 entries inspected. It searches only retained fields,
+not request bodies, omitted events or the source tree. A search miss is not proof
+that code or a call did not run.
+
+### Timeline and large captures
+
+**Code flow / Call tree / Timeline / source**, the distinct service name and
+timeline filter stay pinned below the header. **↑ Top** returns to segment details.
+The **Observed external boundaries** table starts collapsed. Its HTTP observations
+are separate from line events; **External boundaries and exceptions only** filters
+the timeline, not recording.
+
+The timeline displays one bounded page at a time with previous/next/first controls.
+Paged-agent defaults are 500 events / 256 KiB, with a 1 MiB response ceiling;
+legacy retained arrays are also displayed in windows. **View calling code** loads
+the page around the recorded anchor. Enable **Wrap event text**, select a row for
+its retained event JSON and **Copy recorded event**, then Escape/Close returns
+focus. “Full event” means what was retained, not recovery of omitted data.
+
+The current Java reader separates compact overview from event pages. Missing or
+oversized details do not silently remove otherwise available overview evidence
+or substitute a different request. Code-flow reconstruction carries bounded
+stacks across transport pages, but its analysis/display limits still apply.
+See [large-trace budgets](java-capture-storage.md#large-traces-and-paged-details).
+
+## Save, compare and share the view
+
+A live `#trace=…` link rereads retained services after reload. Restart, TTL or
+eviction can remove segments; keeping a graph open is not durable storage.
+**Save snapshot** captures available evidence explicitly. In **Saved captures**,
+**Copy snapshot link** gives a stable local `#snapshot=UUID` link. Missing or corrupt
+saved data is an error, never a live-data fallback.
+
+Current paged saves use a version-2 manifest plus compressed chunks, including
+source lines resolved within capture budgets. Older version-1 JSON captures remain
+readable and unchanged. **Download capture archive** / **Import capture archive**
+round-trip a version-2 ZIP under a new ID. See [storage quotas](java-capture-storage.md):
+version-2 allows 20 captures, 128 MiB raw / 64 MiB compressed per capture;
+the legacy store retains its 5 MiB/file and 20 MiB/store limits. Capacity rejects
+new saves rather than evicting old ones. A capture may be partial and is not an
+atomic cross-service transaction.
+
+**Download graph JSON** contains the bounded graph, not complete events/source.
+Localhost links do not provide remote team access. Review SQL, request values,
+identifiers and source before sharing archives. Existing **Browser only** pins can
+be explicitly copied with **Save to viewer**; saved filter views save no evidence.
+
+Select two captures, Before first, and **Compare selected**. The behavior-first
+review pairs outcomes and external calls, then groups changed methods under their
+supported recorded parent. **Back to comparison** preserves context after inspecting
+exact saved evidence. **All differences** retains the raw count/line report.
+Configured comparison aliases are exact per caller, retain the address and do not
+change correspondence. Pair/all-saved search is bounded, not a full corpus index.
+See the [comparison workflow](developer-workflow.md#3-save-baseline-and-candidate-evidence).
 
 ## Use it through MCP
 
-The read-only request-graph tools are:
+The same Java distribution runs viewer, CLI and MCP. Use the primary service JSON
+from the installation so service/source mappings and evidence stores agree:
 
-- `get_trace_visualization(trace_id)`: returns the canonical request-flow model
-  as structured content, plus a concise description, Mermaid and a viewer link.
-- `show_trace_visualization(trace_id)`: returns the same evidence with an optional
-  MCP Apps UI resource when the client advertises support.
-
-Start with `tracelens_doctor` for setup checks and `investigate_request` to select
-and summarize one API/scenario without silently choosing among multiple matches.
-The [developer workflow](developer-workflow.md) covers these tools and optional
-explicit capture saves. Alternatively, use `find_distributed_traces` to discover
-a request by service alias, HTTP
-method, literal-path substring, user substring and time. Its default window is
-30 minutes, with 100 segment summaries returned (`limit` accepts 1–10,000);
-offline and limited results are explicit. It does not accept every viewer
-filter, such as site or outcome. `get_distributed_trace` returns the joined
-journey including `httpCalls` and metadata-only `externalCalls`.
-
-Use `get_flow_summary(id=segmentId, service=..., instance=...)` for compact
-segment facts and `get_flow(id=segmentId, service=..., instance=...)` for source
-events. The latter defaults to 400 displayed events, but these tools still fetch
-the retained segment export before summarizing/rendering it. A shorter result
-is not a smaller upstream capture. The older single-segment `get_flow_mermaid`
-boundary sketch is not the evidence-backed distributed diagram.
-
-Example prompt:
-
-> Find my latest GET /api/v2/features request in cb-app. Show its request-flow
-> visualization, explain the captured EMS call, and distinguish observed facts
-> from hypotheses. If segments are missing, say so.
-
-Start a combined viewer and configure a matching MCP process:
-
-```bash
-tracelens --services /absolute/path/services.json serve --port 7781
-tracelens --services /absolute/path/services.json mcp --viewer-url http://127.0.0.1:7781/
+```sh
+java -jar tracelens.jar --config cb-app/tracelens.json serve --port 7781
+java -jar tracelens.jar --config cb-app/tracelens.json mcp --viewer-url http://127.0.0.1:7781/
 ```
 
-For one service, use the existing `--url` option instead of `--services`. The
-optional `--viewer-url` must be an HTTP(S) origin without credentials, path,
-query or fragment, identifying an already-running viewer with the same service
-configuration; it does not start a server. Without it, the tool returns
-a viewer-relative trace fragment rather than guessing the correct port.
+Use your primary config for other service selections. `--viewer-url` identifies
+an already-running viewer origin; it does not start one. Reconnect MCP after a
+tooling upgrade. Agent instrumentation changes require the corresponding JVM
+restart, while renderer-only changes require only viewer/MCP refresh.
 
-Restart/reconnect the MCP process after upgrading so the client discovers its
-tools and resource. Embedding depends on the client's advertised MCP Apps
-support; this documentation does not assume any particular client version
-supports it. Text, structured data and the normal viewer remain the fallback.
-In the bundled federation, use `cb-app` / `cb-ems` as service aliases;
-`chargebee-app` is the cb-app repository/lifecycle name. The
-[cb-app launcher](cb-app-integration.md#optional-makefile-launcher) does not start
-the viewer/MCP processes. Its `up` may reuse a healthy JVM; `restart` enables jobs
-and clears Tomcat logs, so save relevant logs and captures before using it.
+Start with `tracelens_doctor` and `investigate_request`; do not silently choose
+among ambiguous requests. `get_trace_visualization(trace_id)` returns the request
+model, concise text, Mermaid and a viewer link. `show_trace_visualization` can
+also provide the shared renderer to an MCP Apps-compatible host. Other hosts
+retain structured/text output; embedded rendering is not guaranteed.
 
-## Shared implementation and evidence rules
-
-`visualization.py` transforms an existing distributed journey without additional
-upstream queries. The viewer's journey response includes that model; the direct
-`GET /api/trace-visualization/{traceId}` endpoint and MCP use the same transformation.
-`web/trace-graph.js` and its stylesheet are reused in the viewer and the bundled
-MCP Apps resource. No external chart library or network-loaded script is required.
-
-Edges come only from recorded boundary ownership and explicit joined call
-links. Queue-consumption boundaries point into the local owner segment; publish
-boundaries point out. These are not inferred producer/consumer joins. The diagram
-never invents links from service names, timestamps, URLs or
-the order in which nodes were returned. It does not add synthetic return arrows.
-Encoded paths are preserved as received by each service.
-
-External observations carry allowlisted metadata, not message bodies or
-arbitrary headers. Kafka `SUBMITTED` means the local send call returned, not
-broker acknowledgement or consumer completion. A consumer-boundary return is
-not proof that all business handling committed. A configured wrapper entry is
-not proof of a network call, and `DB_ROUTE` shows routing/pool choice rather than
-a SQL query. Labels/aliases do not upgrade those observations into remote
-execution. Supported adapters and propagation limits are documented in
-[dependency visibility](dependency-visibility-and-change-impact.md).
-
-Durations are local measurements, not additive cross-service totals. Client HTTP
-duration currently ends at response headers, not full streamed-body consumption.
-Layout is causal, not a synchronized cross-JVM time axis. Missing, ambiguous,
-active, truncated and display-limited evidence is identified explicitly; absence
-does not prove a service was not called. Existing agent capture/loss-accounting
-limitations still apply: the diagram cannot detect events the agent silently lost.
-
-Work is bounded: the model includes at most 128 segments, 128 outgoing HTTP calls
-and 128 other boundary observations, with at most 512 edges;
-the interactive diagram draws at most 96 nodes, 24 causal columns and 384 links.
-Any limits reached are displayed. A node without an incoming observed link is
-not necessarily the original entry point of the real request.
-
-The graph model excludes raw events, source text, context properties and user
-identity fields. This is data minimization, not a guarantee that paths, labels or
-upstream error messages contain no sensitive information. Use the same approved
-access and AI-data policies as the existing MCP integration.
-
-## Deployment boundary
-
-The diagram renderer runs in the Python viewer/MCP and browser presentation
-layers. HTTP/queue boundary capture runs in the Java agent and requires a target
-JVM restart when upgrading that instrumentation; see
-[dependency visibility and change impact](dependency-visibility-and-change-impact.md)
-for supported clients, configuration, evidence limits and activation steps.
-The viewer and MCP processes need an upgrade/restart. Agent reads remain
-non-destructive (`evict=false`). No database, remote collector, production access
-control or global waterfall is introduced by the visualization layer. A separate
-[CLI/MCP workflow](developer-workflow.md) now provides explicit saved-capture
-comparison without adding a viewer comparison UI.
-
-Source drill-down still resolves the configured local checkout. It is not a
-guarantee that the checkout matches the exact build that produced a retained trace.
+Use `get_flow_summary` and `get_flow` for a specific segment, supplying service
+and instance identity. The separate minimized CLI/MCP capture store supports
+offline list/compare/search; **Use with CLI/MCP** creates an explicit minimized
+copy of a viewer capture. A snapshot UUID is not a live trace or segment ID.
 
 ## MCP-first segment execution visualization
 
-`get_segment_execution(segment_id, service?, instance?, max_nodes=200)` is a
-read-only tool that transforms one retained segment into an observed invocation
-model in the Python MCP process. The reconstruction itself adds no Java
-instrumentation, dependency, background polling, database, HTTP endpoint or
-segment-diagram UI.
-A capable MCP client can use the returned model to produce a visualization;
-TraceLens does not guarantee that a particular host will render one.
-The model is returned as structured content and compact JSON text for clients
-without structured-result support. It does not automatically open a diagram.
+`get_segment_execution(segment_id, service?, instance?, max_nodes=200)` returns
+one segment's bounded observed-invocation model. Select the exact segment UUID,
+configured service alias and instance from discovery, not the distributed trace ID.
+A missing/ambiguous identity is an error, not permission to choose another run.
 
-### Developer workflow
+The Java `Execution` model is deterministic, with no LLM reconstruction:
 
-1. Locate a request using `investigate_request`, `find_distributed_traces` or
-   `list_flows`.
-2. Use `get_trace_visualization` for service-level relationships, then select a
-   segment's **segmentId**, configured **service** and **serviceInstanceId**.
-3. Call the tool with that exact canonical lowercase segment UUID, not the
-   distributed trace ID or an API label. Supplying the instance protects against
-   stale service restarts.
-4. Ask the client to draw the returned invocation nodes, one lane per recorded
-   thread name, and retain all incompleteness warnings. Fetch `get_flow` or local
-   source only when deeper source inspection is necessary.
+- Nodes represent distinct retained invocations or markers; parent links mean
+  observed instrumented nesting, not necessarily direct source calls.
+- New events can supply JVM method descriptors and runtime-local thread IDs;
+  legacy events retain less precise name-based matching. Neither provides
+  invocation IDs or establishes cross-thread causality.
+- Entry/exit matching preserves exported sequence order. Gaps, inconsistent
+  clocks and incomplete frames produce warnings/unknown durations.
+- Durations are inclusive local elapsed time, including waits and instrumentation,
+  not CPU/self time. Line association uses recorded coordinates, not source-aware
+  cross-build mapping.
+- Native ClickHouse async completion is not assigned a guessed caller method.
+  HTTP observations without invocation ownership remain separate.
+- Identifiers are untrusted data. Source, arbitrary payload/context and raw
+  exception messages are excluded from the compact model; identifiers and opted-in
+  query details may still be sensitive.
 
-Example tool arguments (replace the IDs with discovered values):
+Reconstruction scans at most 100,000 events, 64 lanes and 512 active frames per lane.
+Requested nodes default to 200 (`max_nodes` accepts 1–500); the browser's rendering
+limits can be lower. The MCP model has a 32 KiB cap and the viewer model 128 KiB.
+Limits return bounded prefixes with omission counts; increasing nodes does not
+bypass byte/event limits. Paged reads keep transport bounded, not analysis unlimited.
+Legacy full-export paths retain their separate byte bounds. See
+[storage and read budgets](java-capture-storage.md).
 
-```json
-{
-  "segment_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-  "service": "cb-ems",
-  "instance": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-  "max_nodes": 100
-}
-```
+## Shared evidence rules
 
-For a single-service MCP configuration, omit `service` or use `default`. For
-federation, use the configured alias such as `cb-app` or `cb-ems`, not a URL.
-Ambiguous/missing discovery or a changed instance returns an error rather than
-silently selecting a different execution. Reconnect the MCP process after
-upgrading. Loading a Python-only reconstruction change does not require a
-cb-app/EMS or viewer restart. Upgrading Java capture adapters still requires the
-corresponding JVM restart; this tool cannot recover boundaries absent from old
-traces.
+Edges come only from recorded ownership and explicit correlation, not similar
+URLs, service names or timestamps. Queue publish/consume direction does not by
+itself join producer and consumer execution. Caller HTTP duration ends at the
+captured client boundary, not necessarily full body consumption.
 
-Example prompt:
+The request model caps segments/HTTP calls at 128 each, other boundaries at 512
+and edges at 512. The browser groups SQL before applying its 96-node, 24-column
+and 384-link display limits. Limits stay visible; old saved projections do not
+regain omitted evidence after an upgrade.
 
-> Find my latest GET /api/v2/features request. Retrieve its request-flow graph,
-> then use get_segment_execution for the cb-ems segment. Visualize the observed
-> method nesting with exceptions and local durations. Keep thread lanes separate,
-> show missing/truncated evidence, and do not invent async arrows or missing calls.
-
-### Model and evidence rules
-
-`execution.py` reconstructs the model deterministically, without an LLM or I/O:
-
-- `segment` contains allowlisted service/build/segment identities, not users or
-  arbitrary context. `lanes` use the recorded thread name; names are not unique
-  thread IDs and may be reused or renamed.
-- `nodes` contains distinct `invocation` nodes (including repeated and recursive
-  calls) and point `marker` nodes for external/DB observations or unmatched exits.
-  `parentId` means **observed instrumented nesting**, not necessarily a direct
-  source-code call. No cross-thread links or synthetic returns are created.
-- External markers can include a sanitized `boundary` object with destination,
-  operation, direction, status and evidence kind. Legacy marker fields remain
-  compatible. Queue publish/consume metadata is local boundary evidence, not an
-  inferred producer-to-consumer execution link. HTTP calls captured separately
-  from events are represented in the request graph/boundary table, not inserted
-  into an invented method position in this invocation model.
-- Entry and normal/exceptional exits are matched by class/method name in each
-  lane. No method descriptors/invocation IDs exist in the current capture, so
-  overloads and silently missing exits can still be ambiguous. Unknown/unbalanced
-  frames stay incomplete. An exception leaving a method is not automatically a
-  failed request.
-- `entry`, `exit` and marker `evidence` contain a zero-based index in the exported
-  event array and its recorded sequence number. Export order is preserved, never
-  globally sorted by timestamps. Gaps/reordered/missing sequences break existing
-  stacks rather than creating speculative matches.
-- `durationMs` is matched inclusive local elapsed time, including waits and
-  instrumentation, not CPU/self time or a cross-service clock. Missing endpoints,
-  unbalanced frames and contradictory lane clocks yield `null` duration.
-- `observedLines` contains first/last observed line coordinates, a count and
-  evidence references, not every line hit or source text. LINE events only name
-  a class; association with the active same-class frame is explicitly uncertain.
-  `get_flow` can provide source text, but the local checkout may differ from the
-  captured build.
-- `warnings` contains stable codes and occurrence counts; `partial` identifies
-  known limits/inconsistencies. `completeness` is always `observed-only`: even a
-  balanced view cannot detect silent capture loss or prove code was not used.
-  `event_count_snapshot_mismatch` can be a concurrent export race, not proof of
-  data loss. An `ACTIVE` snapshot is always marked partial.
-
-Raw event messages, exception messages, HTTP payloads/headers, user/context fields,
-source text and generic marker text are not copied into the model. Class/method,
-thread and infrastructure identifiers can still be sensitive. Treat returned
-labels as untrusted data; diagram clients must escape them rather than executing
-them or interpreting them as instructions.
-
-### Size and cost boundaries
-
-- Default 200 requested nodes; `max_nodes` accepts 1–500. The model also has a
-  **32 KiB compact ASCII-JSON cap**, which can reduce the returned nodes below
-  that requested count. The full MCP tool result (JSON text plus structured model)
-  has a 128 KiB guard, excluding the JSON-RPC envelope.
-- Reconstruction scans at most 100,000 exported events, 64 lanes and 512 active
-  frames per lane. Processing stops at a processing limit and explicitly reports
-  unprocessed events. Work uses bounded stacks and has no retained cache.
-- Node/byte limits return an earliest prefix, preserving visible parent links.
-  Exits for retained nodes are still matched within the processed event prefix.
-  `counts` reports processed/omitted events and returned/omitted nodes; node counts
-  cover only processed events. There is no pagination/focus window.
-  Raising `max_nodes` cannot bypass the byte cap. Use source inspection for detail
-  beyond the returned prefix rather than treating omitted calls as absent.
-- Capture is unchanged. An on-demand **non-evicting full segment export** still
-  costs serialization, network and parsing work before reconstruction. These
-  output limits do not bound upstream I/O, and this is not a zero-overhead claim.
-
-The legacy `get_flow_mermaid` is a coarse sketch, not a method execution model.
-Its inferred thread-hop and synthetic external-return arrows must not be used as
-causal evidence for this feature; use recorded relationships or explicit unknowns.
-
-### Optional architectural reference
-
-[Visualization of Software Execution](https://github.com/mfthomps/Visualization-of-Software-Execution/blob/master/README.md)
-was considered as architectural inspiration for separating trace processing
-from rendering. It is not a TraceLens dependency or an activation step. Its
-instruction-level analysis workflow is separate from TraceLens's JVM event
-format and the lightweight MCP invocation model described above.
-
-Its [control-flow processing](https://github.com/mfthomps/Visualization-of-Software-Execution/blob/master/controlFlow.py)
-and [function aggregation](https://github.com/mfthomps/Visualization-of-Software-Execution/blob/master/functionUse.py)
-are conceptual references for separating invocation history from aggregate views,
-not integrations provided by this repository. TraceLens currently has no Unity
-renderer, instruction-trace importer, automatic change-impact analysis or
-aggregate dead-code detector. Any such work would be a separate feature with its
-own capture, compatibility and licensing review.
+An observed failure is not an automatic root-cause diagnosis. An absent call is
+not proof of deliberate skipping, unused code or complete coverage. Use source,
+tests and controlled reproductions alongside TraceLens. No remote collector,
+production access control or zero-overhead guarantee is supplied by these views.

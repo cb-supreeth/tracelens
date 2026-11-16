@@ -1,6 +1,6 @@
 # TraceLens use-case catalog
 
-Reviewed against the repository implementation on **2026-10-19**. This is a
+Reviewed against the repository implementation on **2026-10-28**. This is a
 catalog of supported workflows and relevant future ideas, not a claim of complete
 execution coverage or of what is installed in a currently running application.
 
@@ -8,11 +8,11 @@ TraceLens answers: **what did this captured execution actually observe?**
 Use source, tests, logs and service contracts alongside it to answer why something
 happened or what could happen in a different execution.
 
-In the bundled local setup, `cb-app` is the TraceLens service/filter identity;
-`chargebee-app` is its repository and lifecycle name. Use the
-[cb-app integration guide](cb-app-integration.md), including its optional
-`Makefile.tracelens` launcher, for setup. A source/configuration change is not
-evidence that an existing JVM or packaged agent has been upgraded.
+Use the current Java bundle and [guided setup](guided-setup.md). The same script
+handles first-time setup and later capture-setting changes. Saving settings is
+not proof that the running JVM loaded them; verify a fresh reproduction after
+the intended restart. In the viewer, **Requests**, **Saved captures**,
+**Performance**, and **Services & capture settings** separate the main tasks.
 
 ## Status key
 
@@ -29,6 +29,7 @@ evidence that an existing JVM or packaged agent has been upgraded.
 | --- | --- | --- |
 | Understand an unfamiliar feature/codebase | Available | [Execution walkthrough](#1-understand-an-unfamiliar-feature) |
 | Find the request behind a page or button without knowing its trace ID | Available | [Request discovery](#2-find-the-request-behind-a-ui-action) |
+| Diagnose a missing capture and save one fresh reproduction | Available: explicitly armed viewer watch | [Guided investigation](#2-find-the-request-behind-a-ui-action) |
 | Debug a reproduced CRI/bug | Available | [Failure investigation](#3-debug-a-reproduced-cri-or-bug) |
 | Group repeated errors and choose a representative request | Available | [Error triage](#4-triage-repeated-errors) |
 | Follow a request across cb-app and EMS | Available with setup | [Cross-service tracing](#5-follow-a-request-across-services) |
@@ -36,13 +37,14 @@ evidence that an existing JVM or packaged agent has been upgraded.
 | Understand queue publishing/consumption | Available with setup | [Messaging](#7-investigate-messaging-boundaries) |
 | Investigate executor work and scheduled jobs | Available with setup | [Background work](#8-investigate-background-and-executor-work) |
 | Understand datasource routing | Available with setup | [Database routes](#9-check-database-routing-decisions) |
-| Spot slow observed paths or repeated work | Manual investigation | [Timing and repetition](#10-investigate-slowness-and-repeated-work) |
+| Find slow/repeated JDBC queries and suspected N+1 patterns | Available: on-demand bounded analysis | [Timing and repetition](#10-investigate-slowness-and-repeated-work) |
 | Compare a feature before and after changes | Available: explicit local captures; impact interpretation remains manual | [Before/after](#11-compare-before-and-after-a-change) |
+| Find a method, exception or destination in saved work | Available: bounded, on-demand evidence search | [Saved evidence search](#11-compare-before-and-after-a-change) |
 | Assess which workflows might be affected by a method change | Manual investigation | [Change impact](#12-assess-change-impact-and-choose-regression-tests) |
 | Verify a reproduction/test exercised intended code | Manual investigation | [Test evidence](#13-check-what-a-test-or-reproduction-exercised) |
 | Give Cursor/Codex runtime context and visualization data | Available | [MCP workflows](#14-provide-runtime-context-to-an-ai-assistant) |
 | Reduce UI noise and preserve an investigation | Available | [Focus and retention](#15-reduce-noise-and-save-an-investigation) |
-| Share evidence with another developer | Available, with manual file handling | [Handoffs](#16-share-a-reproduction-or-review-evidence) |
+| Share evidence with another developer | Available: version-2 capture archive export/import | [Handoffs](#16-share-a-reproduction-or-review-evidence) |
 | Group several requests into a named browser action | Available with optional app changes | [Action labels](#17-group-requests-by-business-action) |
 | Check whether instrumentation/identity/configuration is working | Available | [Setup diagnostics](#18-diagnose-the-tracelens-setup-itself) |
 | Use evidence while designing a new business requirement | Manual investigation | [Feature planning](#19-plan-a-feature-using-existing-runtime-behavior) |
@@ -53,15 +55,24 @@ evidence that an existing JVM or packaged agent has been upgraded.
 **Question:** “When I retrieve a feature, which controller, helper and service
 methods execute, and which external operations are involved?”
 
-Run one representative request, open its flow diagram, select a service segment
-and open its sources. Inspect the captured method/line timeline or ask MCP for
-`get_segment_execution`. Follow the implicated source files rather than reading
-the entire repository without a starting point.
+Run one representative request, select its service card and choose **Open code
+flow** in **Selected evidence**. Request-graph cards stay fixed while the
+adjacent inspector shows details. **Code flow** reads observed methods in thread sections;
+**Call tree** visualizes the same bounded nesting. Search class/method names,
+exception types or destinations, reveal collapsed matches, and use **Focus
+selected branch** to isolate observed ancestors and descendants.
+**Show source in timeline** opens retained source evidence; **Open local source**
+offers editor links to today's configured checkout, not a restored historical
+revision. MCP `get_segment_execution` provides the same kind of bounded execution
+model for an assistant. Follow implicated files rather than reading the entire
+repository without a starting point.
 
 **Useful result:** an evidence-backed walkthrough of that scenario for onboarding,
 code review or debugging. **Limit:** observed nesting is not necessarily a direct
 source call; excluded code, overload ambiguity and missing events can hide detail.
 Source lookup uses a checkout, which may not match the captured build.
+Execution search is bounded to the available model, not all raw events; no match
+does not mean a method never ran.
 
 Read [the codebase walkthrough](codebase-walkthrough.md) and
 [execution-model rules](hybrid-visualization.md#mcp-first-segment-execution-visualization).
@@ -76,6 +87,14 @@ to select the individual request. CLI `investigate` or MCP `investigate_request`
 can find and summarize it, refusing ambiguous matches by default. Use
 `find_distributed_traces` when a broader candidate list is useful.
 No frontend changes or pre-known trace ID are required for this workflow.
+
+For a fresh reproduction, use **Start an investigation → Check capture readiness** with the
+exact backend path and optional method/service/user/site. Checks do not change
+recording or scope. **Watch next request & save** arms a 60/120-second window;
+reproduce only after **Watching** appears. It excludes existing requests and
+saves one unambiguous newly completed request, not an arbitrary latest match.
+Cancellation, timeout and incomplete discovery remain explicit. Review partial
+snapshot warnings; a watch is not proof of complete coverage.
 
 For example, browser navigation `/d/features/test1`, cb-app's
 `/api/v2/features/dGVzdDE=` and EMS's `/features/test1` can be different paths for
@@ -95,16 +114,19 @@ and fetch relevant source detail with `get_flow`.
 which methods an exception escaped, and which dependencies were involved.
 Correlate with existing KVL/APM evidence when payload/state details are needed.
 
-**Limit:** TraceLens does not replay requests or capture arbitrary locals,
-arguments, message bodies or database state. An exception event does not itself
-mean the final HTTP request failed; another frame may have handled it. Legacy
-Spring Datadog enrichment is not universal standalone Datadog correlation.
+**Limit:** TraceLens does not replay requests or capture arbitrary local variables,
+method arguments, queue bodies or database result rows. Incoming API query/body
+evidence and SQL/bindings are separate bounded opt-ins, visible with Copy actions
+in the inspector. An exception event does not itself mean the final HTTP request
+failed; another frame may have handled it.
 
 ## 4. Triage repeated errors
 
-Use the **Errors** view, filter the relevant API/service/time/category/status and
+Use **Requests → Errors**, filter the relevant API/service/time/category/status and
 expand a group. Inspect representative requests rather than every repeated row.
 MCP provides `list_error_groups` and `get_error_group` over retained summaries.
+Scheduled failures remain here even though normal job browsing has its own tab;
+select **Channel → Scheduled jobs** for those failure groups.
 
 **Useful result:** distinguish recurring HTTP 4xx/5xx errors, explicit timeouts
 and execution failures, with recorded boundary-exception classes where available;
@@ -129,7 +151,9 @@ cb-app alone does not start EMS or the combined viewer.
 graph, then inspect the local execution in either service. Each service can also
 be used independently; both agents are not required merely to capture one side.
 
-**Limit:** only supported clients/context seams correlate automatically. Paths
+**Limit:** only supported clients/context seams correlate automatically. Repeated
+calls keep separate captured invocation frames; they are not merged by service
+name. Paths
 remain as each service observed them. Node durations are local, not additive
 cross-service time. See [distributed tracing](distributed-tracing.md).
 
@@ -144,8 +168,9 @@ installing TraceLens in Plans. A missing receiver appears as **Remote execution
 not observed**, rather than disappearing from the diagram.
 
 **Limit:** no remote source/timing/processing is invented. “Not observed” does not
-mean offline. Current JDK HTTP/HTTPS coverage does not imply Apache HttpClient,
-OkHttp or every other library is covered. Wrapper entries and DB routing markers
+mean offline. JDK HTTP/HTTPS and supported synchronous Apache HttpClient 4 paths
+are covered, along with the documented Vert.x client paths; other libraries are
+not automatically covered. Wrapper entries and DB routing markers
 are labelled separately from confirmed client boundaries.
 
 See [the coverage matrix](dependency-visibility-and-change-impact.md#implemented-coverage).
@@ -170,14 +195,31 @@ two observations belong to the same message.
 ## 8. Investigate background and executor work
 
 Use supported executor context continuation to inspect work performed on recorded
-thread lanes. Capture in-scope `@Scheduled` methods as job segments when enabled;
-discover them through channel/label filtering or `list_flows(channel="SCHEDULER")`.
+thread lanes. Capture in-scope Spring `@Scheduled` methods when
+`instrumentScheduled` is enabled. Chargebee's custom `Job` scheduler instead
+needs the separate exact-name `chargebeeJobTypes` opt-in and matching method/line
+package scope; enabling Spring scheduled tracing alone does not cover it.
+See [custom-job setup](cb-app-integration.md#capture-a-chargebee-custom-scheduled-job).
+Each selected custom dispatch is a new scheduler-rooted attempt, not an automatic
+continuation of its scheduling API request. Known audit outcomes distinguish
+success, skip and failure; an unrecognized outcome remains unknown.
+For either supported job mechanism,
+discover them in the **Scheduled jobs** tab or with
+`list_flows(channel="SCHEDULER")`. The tab groups repeated runs by job label and
+service and has independent service/time/job-name/outcome filters. Expand a group
+and open one run to retain all linked observed service segments in its graph and
+source views, or save a snapshot. Scheduler-rooted captures stay out of Live
+requests even under All request channels/Show all retained; those controls remain scoped
+to the active Live requests or Scheduled jobs tab.
 
 **Useful result:** code paths/errors from jobs and supported asynchronous work,
-not only servlet requests. **Limit:** thread names are not unique IDs or proof of
-an exact handoff. Raw threads, common-pool/reactive/custom executors and arbitrary
+not only servlet requests. **Limit:** new runtime-local thread IDs improve lane
+identity; legacy names remain ambiguous, and neither proves a handoff. Raw
+threads, common-pool/reactive/custom executors and arbitrary
 schedulers are not universally covered. No synthetic cross-thread causal links
-are added by the execution model.
+are added by the execution model. `COMPLETED` is not proof of business success.
+The tab changes presentation only; capture requires the appropriate loaded agent
+and JSON. It does not add scheduler coverage or alter recording by itself.
 
 ## 9. Check database-routing decisions
 
@@ -186,20 +228,30 @@ their place in the observed execution. This can help investigate why code chose
 a read/write/tenant route when that route is recorded.
 
 **Limit:** this is pool/route selection, not SQL tracing, query parameters, query
-plans, row changes or proof that the database operation completed. Use database
-logs/APM/SQL tools for those questions.
+plans, row changes or proof that the database operation completed.
+
+For PostgreSQL/MySQL SQL text and client execution timing, separately enable
+[local SQL query capture](jdbc-query-capture.md). This adds query evidence, not
+query plans, result rows or proof of transaction commit. Raw SQL is not sanitized.
 
 ## 10. Investigate slowness and repeated work
 
-Filter by request/root duration, inspect caller HTTP timing and compare method
-invocation/repetition patterns within a captured scenario. Look for candidate
-repeated calls or long local waits, then verify with controlled measurements.
+Open **Performance**, choose recent captured requests or one saved capture, set
+thresholds and **Analyze**. Recent runs inspect at most ten newest matching
+requests. **Category** focuses slow queries, repeated queries, suspected N+1 or
+query-heavy segments without rereading evidence. Choose a **Captured occurrence**
+and **Open query evidence** to inspect the exact retained call; the picker is
+bounded to the first 200 query nodes.
 
-**Useful result:** leads for performance investigation and code review.
-**Limit:** elapsed duration includes waits and tracing overhead, not CPU/self time.
-HTTP timing stops at response headers/error/disconnect, not body consumption.
-One before/after sample is not a benchmark; repeated calls do not automatically
-prove an N+1 database problem or an unnecessary business operation.
+**Useful result:** ranked JDBC patterns and specific calls to investigate, with
+captured SQL, timing and optional bindings. This analyzes PostgreSQL/MySQL JDBC
+evidence, not native ClickHouse or fleet-wide traffic, and does not enable capture.
+Method/HTTP timing can provide additional leads; verify with controlled tests.
+
+**Limit:** suspected N+1 is a heuristic, not proof of a bug. No findings is not a
+health verdict. Inclusive local duration includes waits/tracing overhead, not
+CPU/self time, and cumulative query time can overlap. One before/after sample
+is not a benchmark. See [Performance insights](performance-insights.md).
 
 ## 11. Compare before and after a change
 
@@ -209,15 +261,35 @@ prove an N+1 database problem or an unnecessary business operation.
 3. Save the candidate separately and compare observed paths, exceptions, statuses
    and external dependencies. Interpret the differences with source and tests.
 
-**Available today:** `capture save/list/compare` in the CLI and
+**Available today:** in **Saved captures**, select two viewer snapshots, Before
+first, then **Compare selected** and **Compare saved snapshots**. Behavior review
+pairs response outcomes and external calls before method differences. Changed
+methods group under their outermost supported recorded parent, with child
+differences expandable. Search finds nested children. Exact per-caller configured
+aliases label destinations without changing the recorded address or matching.
+Open the exact saved invocation, then **Back to comparison** to restore context.
+**All differences** keeps the flat detailed report. Alternatively use
+`capture save/list/compare` in the CLI and
 `save_request_capture`, `list_request_captures`, `compare_request_captures` in MCP.
-These use bounded local JSON evidence, separate from browser pins, and work after
-JVM restart. See the [complete workflow](developer-workflow.md).
+These reuse the same bounded comparison engine and work after JVM restart.
+Full viewer files and minimized CLI captures remain separate. **Use with
+CLI/MCP → Create CLI/MCP capture** explicitly copies a selected viewer snapshot
+to a new minimized capture without changing its original.
+
+Find prior evidence with **Search saved evidence** across viewer files and
+minimized captures, or `capture search` / `search_saved_captures` across the
+minimized store only. Search is literal, bounded and on demand, not a global
+usage index or a coverage guarantee. See the [complete workflow](developer-workflow.md).
+
+**Example:** a baseline EMS call returned 404; the candidate returned 200 and that
+call was not observed. This makes the behavioral difference visible, but proving
+that a new guard deliberately skipped it still requires source/test evidence.
+Review input/build/scope gaps before interpreting absence.
+
 **Not implemented:** automatic source-aware cross-build line alignment,
-changed-method-to-all-workflows impact analysis or a capture-diff viewer UI.
+changed-method-to-all-workflows impact analysis or a graph-overlay diff. Parent
+grouping is observed nesting, not proof the parent's implementation changed.
 Line numbers can shift; missing observations do not establish removed/dead code.
-Browser pins remain inaccessible to MCP. Re-pinning the same request replaces
-that pin; it is not version history.
 
 ## 12. Assess change impact and choose regression tests
 
@@ -226,8 +298,10 @@ workflows. Identify executions that reached changed code and the downstream
 operations those executions observed; prioritize regression/contract tests for
 those APIs, jobs, services and topics.
 
-Use three explicit confidence levels: **observed** in a capture, **potential**
-from code/contracts, and **unknown** due to missing workload or capture coverage.
+Use the [impact-analysis skill](impact-analysis-skill.md) to guide this manual
+workflow. Separate **observed** runtime evidence, **potential** effects from
+code/contracts, **verified** outcomes from supplied test assertions, and
+**unknown** gaps in workload, build identity or capture coverage.
 There is no automatic changed-method-to-all-workflows index or
 `analyze_change_impact` MCP tool yet. Absence from traces cannot establish that
 a change is safe or a method is dead.
@@ -264,8 +338,11 @@ Example prompt:
 
 The viewer owns a small deterministic request graph. Compatible MCP Apps clients
 can show the same renderer; other clients receive structured/text/Mermaid output.
-`get_segment_execution` provides data for the client to visualize, not an automatic
-new full method-graph UI in TraceLens. It does not require an LLM inside the JVM.
+`get_segment_execution` provides a bounded local model for the client; the normal
+viewer also offers **Code flow** and **Call tree**. Missing-capture checks use
+`diagnose_capture_request`; explicit local `save_request_capture` and offline
+`compare_request_captures` / `search_saved_captures` support before/after analysis.
+None of these require an LLM inside the JVM.
 
 **Limit:** client capabilities vary; data retrieval does not guarantee a diagram
 will render. Source/trace data sent to an assistant follows the team's AI/data
@@ -274,16 +351,23 @@ policy. See [hybrid visualization](hybrid-visualization.md).
 ## 15. Reduce noise and save an investigation
 
 Filter API/service/time/user/site/outcome, collapse repeated APIs and use Errors
-for failure-focused triage. Save a view to reuse filters. Open a segment and use
+for failure-focused triage. Scheduled runs have their own grouped tab and independent
+filters; Live requests does not include scheduler-rooted captures. **Show all retained**
+stays within the active Live requests or Scheduled jobs tab. Save a view to reuse
+filters. Open a segment and use
 **External boundaries and exceptions only** to focus on integration activity.
 
-Pin selected evidence before it expires or the service restarts. Pins store
-bounded snapshots in the current browser origin's IndexedDB, not in a service DB.
-They are not automatically permanent, atomic or complete; inspect capture warnings.
+Use **Save snapshot** on a selected request or job run before it expires or the
+service restarts. It saves bounded evidence to viewer-local files; older browser
+pins remain separate browser-local records. Saving is not an atomic cross-service
+capture and can be partial; inspect warnings. Viewer files persist across service
+restarts, while browser-only pins still depend on that browser's storage.
 Saved views retain filters, not traces. Live links stop being useful after eviction.
-For terminal/assistant access after restart, explicitly use `capture save` or
-`save_request_capture` instead. Those bounded local JSON files support offline
-list/compare, but are not browser pins or a viewer import feature. Choose the
+For terminal/assistant access after restart, explicitly use `capture save`,
+`save_request_capture` or the viewer's **Use with CLI/MCP** action. Those separate
+minimized JSON files support offline list/compare/search; a viewer file is not
+automatically made available to MCP. Use the same configured capture directory
+across viewer/CLI/MCP. Choose the
 [storage workflow](developer-workflow.md#storage-privacy-and-cost) that matches
 the handoff you need.
 
@@ -293,25 +377,17 @@ See [the request-focused viewer guide](request-focused-ui.md).
 
 ## 16. Share a reproduction or review evidence
 
-Share setup instructions and a scoped reproduction, or explicitly export the
-needed segment JSON for an approved handoff. For example, with the installed CLI:
+For a version-2 saved capture, choose **Download capture archive** and send the
+ZIP through an approved channel. The recipient uses **Saved captures → Import
+capture archive** in a current viewer. Import creates a new saved ID, without
+replaying the request or contacting the original applications. Older version-1
+JSON snapshots remain readable but do not gain archive export automatically.
 
-```bash
-tracelens --url http://127.0.0.1:7778 export SEGMENT_UUID > feature-baseline.json
-```
-
-Replace the UUID; the CLI requests a non-evicting export. For federation specify
-the configured service/instance if needed. A distributed reproduction may need
-multiple segment files; this is not an automatic complete support bundle.
-
-**Download graph JSON** contains the bounded graph, not all execution/source data.
-A copied localhost request link is not a public share link. Browser pins have no
-built-in team-sharing or MCP import feature. Review identifiers/source/exception
-messages before sharing; standalone payload exclusion is not a blanket PII claim.
-Named CLI/MCP captures are a separate, minimized local-file format for comparison;
-there is no automatic team upload or browser-pin conversion. See the
-[developer workflow](developer-workflow.md) before choosing between a raw export
-and a named capture.
+**Download graph JSON** is only the bounded graph, not all events/source. A copied
+localhost link is not a public share link. Named CLI/MCP captures are separate
+minimized files for offline comparison/search; **Use with CLI/MCP** creates a local
+copy, not a team upload. Review request values, SQL/bindings, source and identifiers
+before sharing any format. See [storage](java-capture-storage.md).
 
 See [sharing and configuration](sharing-and-configuration.md).
 
@@ -332,18 +408,21 @@ See [optional UI action integration](ui-action-integration.md).
 
 ## 18. Diagnose the TraceLens setup itself
 
-Start with `tracelens doctor` or MCP `tracelens_doctor` for bounded, read-only
-per-service checks and suggested fixes. See the [developer workflow](developer-workflow.md).
-Readiness is not proof of runtime coverage or acceptable overhead.
-For an already configured cb-app checkout, the optional
-[launcher](cb-app-integration.md#optional-makefile-launcher) also provides
-`check` and `status`; these do not start or restart the application. Its `up`
-reuses a healthy JVM, whereas `restart` clears Tomcat logs and enables jobs.
-Preserve logs and explicit captures before choosing a restart.
+Start with **Services & capture settings**, the generated `check-setup.sh`, or
+`java -jar tracelens.jar --config cb-app/tracelens.json doctor` for bounded,
+read-only per-service checks. Substitute your primary config. Use MCP
+`tracelens_doctor` for the same workflow. Reopen `sh setup.sh` to review configuration
+changes; saving settings and restarting a supported service are separate actions.
+See the [developer workflow](developer-workflow.md). Readiness is not proof of
+runtime coverage or acceptable overhead.
 
 Inspect `summary`, `metadata`, instrumented-class diagnostics and a known test
 request. Check package/entry scope, effective capture/propagation settings, service
 instance identity, retention, context drops and the actual supported client library.
+For one exact backend path, use viewer **Start an investigation → Check capture readiness**,
+CLI `diagnose --path ...` or MCP `diagnose_capture_request`. They distinguish
+confirmed exclusions from unknowns using current running metadata and retained
+summaries; current settings cannot establish why an earlier request is absent.
 
 **Useful result:** distinguish stale agent/configuration, wrong port/source root,
 missing context and expired data from a product bug. Verify authenticated identity
@@ -376,6 +455,11 @@ Do not replace durable KVL/APM signals with line-level tracing.
 
 ## Roadmap use cases — not implemented
 
+The [prioritized roadmap](roadmap.md) is the source of truth for proposed work.
+Version-2 local archive sharing and bounded query analysis already exist; a shared
+dev/sandbox workflow corpus, change-impact reports and fleet-wide analysis do not.
+The table below lists broader ideas, not additional current features.
+
 | Idea | Evidence/infrastructure needed |
 | --- | --- |
 | Source-aware cross-build comparison | Explicit local snapshot diffs are implemented; verified build identity and source-aware line/method alignment remain future work |
@@ -385,7 +469,7 @@ Do not replace durable KVL/APM signals with line-level tracing.
 | API docs + user/business docs as AI context | Versioned approved sources, retrieval, access control and citations alongside runtime evidence |
 | CI regression/coverage guardrails | A test harness and explicit stable assertions over controlled scenarios; no such CI policy exists today |
 | Historical error/incident similarity | Selected retained evidence and privacy-aware indexing; no vector DB is currently present |
-| Central team capture sharing | Protected storage/collector, import/export contracts, retention and access policies |
+| Central team capture sharing | Local archive import/export exists; a shared collector still needs protected storage, retention and access policies |
 | Additional protocol/runtime coverage | Adapters for unsupported clients/frameworks, tested context propagation and compatibility |
 
 Explicit local files now support the initial comparison workflow.
@@ -395,8 +479,13 @@ does not turn incomplete traces into complete coverage.
 ## Common prerequisites and non-guarantees
 
 - A supported agent/hook, active capture context, appropriate scope and retained
-  data must all be present. The local cb-app defaults focus on Features/entitlements,
-  not all business code; widen deliberately for another feature.
+  data must all be present. The [current cb-app template](../scripts/cb-app/tracelens.json)
+  includes selected Features, Plans/items, subscriptions and billing-related
+  paths/packages and custom job types, not all business code. Existing local
+  configs and older downloaded bundles may differ.
+  Edit `httpIncludePaths` and packages together in the selected service JSON,
+  preserve existing investigation paths, and restart the app when ready. Launch
+  flags and viewer filters are not additional sources of capture scope.
 - A receiver agent is needed to inspect receiver internals, not to display a
   supported caller observation.
 - Source lines come from bytecode debug metadata; human source comes from the

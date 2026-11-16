@@ -89,7 +89,7 @@ it is not a frozen record of all requests that ever belonged to that action.
 Both work within the summary set returned by the configured services; federation
 uses its default 1,000-summary discovery limit for these action tools.
 The returned lifecycle status is not a complete business-outcome diagnosis.
-Neither tool reads browser pins. An empty result may mean headers were absent,
+Neither tool reads saved files or browser pins. An empty result may mean headers were absent,
 capture was not enabled for the entry point, the time filter excluded the action,
 or data is no longer retained.
 
@@ -102,17 +102,30 @@ the tools remain usable as text/structured evidence.
 
 Action fields are retained in the same bounded in-memory TraceLens store as the
 trace. There is no database-backed action history or durable collector. An
-explicit browser pin can keep the retrieved request snapshot in that browser,
-but does not freeze the whole action or make it available through MCP.
+explicit **Save snapshot** keeps one retrieved request in the viewer's private
+local store. New captures use [paged V2 files](java-capture-storage.md) with ZIP
+download/import; existing JSON snapshots remain readable. Legacy browser-only
+pins stay in that browser until **Save to viewer**
+is chosen. Neither freezes the whole action or automatically makes the full
+snapshot available through MCP.
 
 CLI/MCP now also support [explicit saved request captures](developer-workflow.md#3-save-baseline-and-candidate-evidence)
-in local JSON files, separate from browser pins. After discovering an action's
+in minimized local JSON files, separate from full viewer snapshots and browser
+pins. After discovering an action's
 member requests, save each desired distributed trace separately with
 `save_request_capture(name=..., trace_id=...)` before restart or eviction. These
 are bounded, sanitized execution snapshots, not an archive of all action fields
-or an atomic multi-request action capture. `list_request_captures` and
-`compare_request_captures` work offline on that capture store; `find_actions` and
-`get_action` still query live retained summaries, not saved files.
+or an atomic multi-request action capture. `list_request_captures`,
+`compare_request_captures` and `search_saved_captures` work offline on that
+minimized capture store; `find_actions` and `get_action` still query live
+retained summaries, not saved files.
+
+In **Saved captures**, select **Before** and **After**, then **Compare selected**
+to compare two viewer snapshots offline. **Use with CLI/MCP** explicitly creates a new minimized copy
+of a selected viewer snapshot in the CLI/MCP store without changing the original.
+Use the same `--capture-dir` for viewer and CLI/MCP when overriding its default.
+Saving or searching an individual request still does not establish the complete
+set of requests belonging to its UI action.
 
 Durable shared action history is a future storage design, not a setup step for
 this feature. If built, asynchronous summary/timeline export would need explicit

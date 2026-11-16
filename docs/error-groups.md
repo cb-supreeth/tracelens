@@ -2,28 +2,30 @@
 
 The **Errors** tab groups similar observed failures from retained trace summaries.
 It is a discovery aid, not an incident tracker or production-wide error-rate
-dashboard. It is implemented in the viewer/Python layer and adds no database or
-Java instrumentation. Richer route/site/boundary-exception fields still require
+dashboard. It is implemented in the Java viewer/tooling and browser layers and
+adds no database or agent callbacks. Richer route/site/boundary-exception fields still require
 the corresponding agent version to have captured them; an older trace cannot
 gain them from a viewer upgrade.
 
 ## Workflow
 
-1. Open **Errors** beside **Live requests** and **Pinned captures**.
+1. Open **Requests → Errors**, beside Live requests and Scheduled jobs.
 2. Choose a time window and, optionally, a failing service or API.
 3. Narrow by failure category, exact HTTP status or recorded boundary exception
    class. Change the channel to include scheduled jobs or queue work.
 4. Expand an error group to see its individual requests.
-5. Open a request's flow diagram or expand its service segments to inspect code.
-   Pin an interesting request for a browser-local point-in-time snapshot.
+5. Open a request's flow diagram, select the service card and choose **Open code
+   flow** in **Selected evidence**. The graph cards stay fixed while the adjacent
+   inspector holds the selected details.
+   Use **Save snapshot** for a viewer-file point-in-time copy before live evidence
+   expires.
 6. Use **Save current view** to save the Errors tab and its filters in this browser.
    Selecting that saved view restores the mode, service and failure filters.
 
 Expanded error-group members use a red-accented region, **Request N of M** labels
 and an **End of group** row. These are separate request executions, not merged
-events. For application setup rather than error filtering, use the
-[cb-app integration guide](cb-app-integration.md); the launcher does not start
-the viewer or guarantee that a newly configured agent is already loaded.
+events. Application connection/setup checks are in **Services & capture settings**;
+a configured or connected service is not proof of capture coverage.
 
 API, method and channel selectors apply to the **failing segment** in this mode.
 Selecting cb-app and HTTP 503 does not match a successful cb-app segment merely
@@ -58,6 +60,11 @@ root cause. Summaries do not provide generalized stacks for stack-based grouping
 
 ## Counts and incomplete evidence
 
+- The **Errors tab badge** counts unique matching retained requests with failures,
+  not failing segments or groups. It follows the time window and Errors filters;
+  one request is counted once even if several services failed. The badge uses
+  already-loaded summaries outside Errors and the error-group result inside it,
+  without fetching execution events. `…` means loading and `—` means unavailable.
 - **Requests** counts unique logical requests within a group.
 - **Failing segments** counts matching service-local failure observations.
 - **First/latest** refers to retained observations, not the true first occurrence
@@ -76,16 +83,15 @@ root cause. Summaries do not provide generalized stacks for stack-based grouping
 - Unavailable services appear as data-availability warnings, not application
   error groups. Missing evidence does not prove there were no errors.
 
-Grouping uses up to 1,000 recent retained segment summaries across configured
-services, selected after the upstream summary lists are fetched. This limit is
-not a cap on upstream response bytes. Retention, eviction and the selection limit
-can omit part of a request.
+The viewer/MCP path groups up to 1,000 recent retained segment summaries across
+configured services. Discovery also has bounded read/time budgets; retention,
+eviction, unavailable services and selection limits can omit part of a request.
 Partial/limited results are reported. The view does not export every trace's
 events to fill gaps. Counts are not an error rate or historical aggregate.
 
 ## Shared API and MCP
 
-`GET /api/error-groups` and MCP use the same Python grouping model. Filters:
+`GET /api/error-groups` and MCP use the same Java grouping model. Filters:
 `service`, `method`, `path`, `channel`, `category`, `http_status`, `exception_class`,
 `user`, `site`, `since_minutes`, `query`, `min_duration`, `max_duration`.
 
@@ -121,20 +127,22 @@ provides the separate MCP invocation model. Example:
 > request flow and explain what the captured evidence does and does not establish.
 
 Reconnect MCP after upgrading. A group ID is a signature, not a stored incident;
-members change as requests arrive or are evicted. Browser pins remain separate
-and are not accessible through MCP.
+members change as requests arrive or are evicted. Full viewer snapshots and legacy
+browser pins are separate from MCP's minimized capture files.
 To preserve a chosen request for a later terminal/assistant investigation, use
 `save_request_capture` with its exact request trace ID, then the local capture
-list/compare tools. This is an explicit bounded JSON save, not persistent error
-group history or a browser-pin import. The
+list/compare/search tools. For an already-saved viewer file, **Saved captures → Compare & search
+saved captures → Use with CLI/MCP** explicitly creates a minimized copy for those
+tools. Legacy browser pins first need **Save to viewer**. These are explicit
+bounded copies, not persistent error-group history or automatic imports. The
 [developer workflow](developer-workflow.md) explains time/filter selection and
 capture storage; save needed evidence before restarting the application.
 
 Polling uses summary metadata only. Events/source lines are read on explicit
-drill-down or pinning. Payloads, raw headers and source events are excluded from
+drill-down or snapshot saving. Payloads, raw headers and source events are excluded from
 group responses; API paths, user identities and service error text may still be
 sensitive and must follow existing access/data policies.
 
-See [request discovery and browser snapshots](request-focused-ui.md),
+See [request discovery and saved snapshots](request-focused-ui.md),
 [visualization modes](hybrid-visualization.md), and the
 [use-case guide](use-cases.md) for the next investigation step.
