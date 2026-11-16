@@ -89,6 +89,7 @@ def test_initialize_and_tool_discovery_follow_mcp_shape():
         "get_segment_execution",
         "tracelens_doctor", "investigate_request", "save_request_capture",
         "list_request_captures", "compare_request_captures",
+        "diagnose_capture_request", "search_saved_captures",
     }
 
 

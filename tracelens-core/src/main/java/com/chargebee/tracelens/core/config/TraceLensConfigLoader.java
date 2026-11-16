@@ -22,6 +22,7 @@ public final class TraceLensConfigLoader {
     public static final String CONFIG_PATH_PROPERTY = "tracelens.configPath";
     public static final String APPLICATION_ID_OVERRIDE = "tracelens.applicationId";
     public static final String APPLICATION_VERSION_OVERRIDE = "tracelens.applicationVersion";
+    public static final String LEGACY_HTTP_INCLUDE_PATHS_PROPERTY = "tracelens.http.includePaths";
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -44,6 +45,7 @@ public final class TraceLensConfigLoader {
     }
 
     public TraceLensConfig load(Path path, boolean allowEmptyScope) {
+        rejectLegacyHttpIncludePaths();
         if (!Files.isRegularFile(path)) {
             throw new IllegalStateException("tracelens config not found: " + path.toAbsolutePath());
         }
@@ -59,6 +61,14 @@ public final class TraceLensConfigLoader {
             throw new IllegalStateException("invalid tracelens config " + path + ": " + String.join("; ", errors));
         }
         return config;
+    }
+
+    /** Never let an obsolete JVM scope silently fall back to the broad JSON default. */
+    public static void rejectLegacyHttpIncludePaths() {
+        if (System.getProperty(LEGACY_HTTP_INCLUDE_PATHS_PROPERTY) != null) {
+            throw new IllegalStateException("-D" + LEGACY_HTTP_INCLUDE_PATHS_PROPERTY
+                    + " is no longer supported; migrate its paths to the httpIncludePaths JSON array in tracelens.json and remove the JVM property");
+        }
     }
 
     private void applyOverrides(TraceLensConfig config) {

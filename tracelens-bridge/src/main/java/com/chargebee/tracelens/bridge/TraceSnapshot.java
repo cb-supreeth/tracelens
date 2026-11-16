@@ -87,6 +87,39 @@ public final class TraceSnapshot {
         return map;
     }
 
+    /** Explicit messaging carrier: local request metadata must never become message attributes. */
+    public Map<String, String> toPropagationMap() {
+        Map<String, String> map = new LinkedHashMap<>();
+        if (!putPropagation(map, TRACE_ID_KEY, traceId, 128)
+                || !putPropagation(map, SEGMENT_ID_KEY, segmentId, 128)) return Collections.emptyMap();
+        putPropagation(map, LENS_ID_KEY, lensId, 256);
+        putPropagation(map, USER_KEY, user, 256);
+        putPropagation(map, ACTION_ID_KEY, propagationAttribute(ACTION_ID_KEY, "actionId"), 256);
+        putPropagation(map, ACTION_NAME_KEY, propagationAttribute(ACTION_NAME_KEY, "actionName"), 256);
+        putPropagation(map, SESSION_ID_KEY, propagationAttribute(SESSION_ID_KEY, "sessionId"), 256);
+        putPropagation(map, "siteId", attributes.get("siteId"), 256);
+        W3CTraceContext context = W3CTraceContext.fromSnapshot(this);
+        if (context != null) {
+            map.put("spanId", context.getSpanId());
+            map.put("traceFlags", context.getFlags());
+            if (map.size() < 10) putPropagation(map, "tracestate", context.getTracestate(), 512);
+        }
+        // Prefer core correlation when the ten-slot ceiling excludes tracestate.
+        return map;
+    }
+
+    private String propagationAttribute(String wireKey, String localKey) {
+        String wire = attributes.get(wireKey), local = attributes.get(localKey);
+        return wire != null && local != null && !wire.equals(local) ? null : wire != null ? wire : local;
+    }
+
+    private static boolean putPropagation(Map<String, String> map, String key, String value, int limit) {
+        if (value == null || value.isEmpty() || value.length() > limit) return false;
+        for (int i = 0; i < value.length(); i++) if (Character.isISOControl(value.charAt(i))) return false;
+        map.put(key, value);
+        return true;
+    }
+
     /** Rebuild from transport attributes; null when no trace id is present. */
     public static TraceSnapshot fromMap(Map<String, String> map) {
         if (map == null) {
@@ -101,9 +134,17 @@ public final class TraceSnapshot {
         rest.remove(SEGMENT_ID_KEY);
         rest.remove(LENS_ID_KEY);
         rest.remove(USER_KEY);
+        restorePropagationAttribute(rest, ACTION_ID_KEY, "actionId");
+        restorePropagationAttribute(rest, ACTION_NAME_KEY, "actionName");
+        restorePropagationAttribute(rest, SESSION_ID_KEY, "sessionId");
         String segmentId = map.get(SEGMENT_ID_KEY);
         return new TraceSnapshot(traceId, segmentId == null ? traceId : segmentId,
                 map.get(LENS_ID_KEY), map.get(USER_KEY), rest);
+    }
+
+    private static void restorePropagationAttribute(Map<String, String> attributes, String wireKey, String localKey) {
+        String value = attributes.remove(wireKey);
+        if (value != null) attributes.put(localKey, value);
     }
 
     @Override

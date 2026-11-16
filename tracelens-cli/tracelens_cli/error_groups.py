@@ -169,16 +169,21 @@ def _normalize(row):
     boundary = _first_text(row.get("filterException"), attrs.get("filterException"))
     timeout = _true(row.get("asyncTimeout")) or _true(attrs.get("asyncTimeout"))
     exception_count = _first_number(row.get("exceptionCount"), attrs.get("exceptionCount")) or 0
-    has_errors = (http_status is not None and http_status >= 400) or status in ("FAILED", "ERROR") or row.get("hasErrors") is True or timeout
+    channel = _first_text(row.get("entryChannel"), row.get("channel"), attrs.get("entryChannel"), limit=64).upper() or "UNKNOWN"
+    job_outcome = _first_text(row.get("jobOutcome"), attrs.get("jobOutcome")).upper() or None
+    job_failure = _first_text(row.get("jobFailureType"), attrs.get("jobFailureType"))
+    has_errors = ((http_status is not None and http_status >= 400) or status in ("FAILED", "ERROR")
+                  or row.get("hasErrors") is True or timeout or (channel == "SCHEDULER" and job_outcome == "FAILED"))
     boundary_evidence = bool(boundary and boundary.lower() != "false")
     exception_class = boundary if boundary.lower() not in ("true", "false", "null", "none") and _CLASS.fullmatch(boundary) else None
+    if not exception_class and channel == "SCHEDULER" and job_outcome == "FAILED" and _CLASS.fullmatch(job_failure):
+        exception_class = job_failure
     method = _first_text(row.get("httpMethod"), row.get("method"), attrs.get("httpMethod"), attrs.get("method"), limit=32).upper()
     path = _first_text(row.get("path"), attrs.get("path"), limit=MAX_PATH)
     route_values = (row.get("routeTemplate"), row.get("httpRoute"), row.get("httpRouteTemplate"),
                     attrs.get("routeTemplate"), attrs.get("httpRoute"), attrs.get("httpRouteTemplate"), attrs.get("http.route"), attrs.get("route"))
     template = _first_text(*route_values, limit=MAX_PATH)
     label = _first_text(row.get("lensId"), row.get("label"), attrs.get("lensId"))
-    channel = _first_text(row.get("entryChannel"), row.get("channel"), attrs.get("entryChannel"), limit=64).upper() or "UNKNOWN"
     user = _first_text(row.get("user"), attrs.get("user"))
     site = _first_scalar(row.get("siteId"), row.get("site"), attrs.get("siteId"), attrs.get("site"))
     node = {"traceId": _trace_id(row.get("traceId")), "segmentId": _text(row.get("segmentId")),
@@ -190,6 +195,12 @@ def _normalize(row):
             "spanId": _first_text(row.get("spanId"), attrs.get("spanId")),
             "method": method, "httpMethod": method, "path": path, "routeTemplate": template,
             "label": label, "lensId": label, "channel": channel, "entryChannel": channel,
+            "jobType": _first_text(row.get("jobType"), attrs.get("jobType")) or None,
+            "jobId": _first_scalar(row.get("jobId"), attrs.get("jobId")) or None,
+            "jobOutcome": job_outcome,
+            "jobAuditStatus": _first_text(row.get("jobAuditStatus"), attrs.get("jobAuditStatus")).upper() or None,
+            "jobFailureType": job_failure if _CLASS.fullmatch(job_failure) else None,
+            "scheduler": _first_text(row.get("scheduler"), attrs.get("scheduler")) or None,
             "status": status, "httpStatus": http_status, "user": user, "site": site, "siteId": site,
             "startedAtMillis": started,
             "lastActivityMillis": _first_number(row.get("lastActivityMillis"), attrs.get("lastActivityMillis"), row.get("endedAt"), started),
@@ -235,19 +246,24 @@ def _requests(segments, conflicting_identities):
         missing = len(roots) != 1 or conflicting_root
         root = roots[0] if roots else members[0]
         errors = any(s["hasErrors"] for s in members)
-        active = any(s["status"] == "ACTIVE" for s in members)
-        success = not missing and root["httpStatus"] is not None and 200 <= root["httpStatus"] < 400
+        active = any(s["status"] == "ACTIVE" or (s["channel"] == "SCHEDULER" and s["jobOutcome"] == "RUNNING") for s in members)
+        job = root["channel"] == "SCHEDULER"
+        success = not missing and (root["jobOutcome"] == "SUCCEEDED" if job
+                                   else root["httpStatus"] is not None and 200 <= root["httpStatus"] < 400)
+        skipped = not missing and job and root["jobOutcome"] == "SKIPPED"
         starts = [s["startedAtMillis"] for s in members if s["startedAtMillis"] is not None]
         activity = [s["lastActivityMillis"] for s in members if s["lastActivityMillis"] is not None]
         requests.append({"key": key, "traceId": members[0]["traceId"], "segments": members, "root": root,
                          "rootMissing": missing, "rootAmbiguous": len(roots) > 1,
-                         "label": root["label"] or " ".join(p for p in (root["method"], root["path"]) if p) or root["channel"] + " request",
+                         "label": root["label"] or (job and root["jobType"]) or " ".join(p for p in (root["method"], root["path"]) if p) or root["channel"] + " request",
                          "method": root["method"], "path": root["path"], "user": root["user"], "site": root["site"],
+                         "jobType": root["jobType"], "jobId": root["jobId"], "jobOutcome": None if missing else root["jobOutcome"],
+                         "jobAuditStatus": root["jobAuditStatus"], "jobFailureType": root["jobFailureType"], "scheduler": root["scheduler"],
                          "services": sorted({s["service"] for s in members}), "channel": root["channel"],
                          "startedAtMillis": root["startedAtMillis"] if not missing and root["startedAtMillis"] is not None else min(starts) if starts else None,
                          "lastActivityMillis": max(activity) if activity else None,
                          "durationMs": None if missing else root["durationMs"], "httpStatus": None if missing else root["httpStatus"],
-                         "outcome": "error" if errors else "active" if active else "success" if success else "unknown",
+                         "outcome": "error" if errors else "active" if active else "success" if success else "skipped" if skipped else "unknown",
                          "hasErrors": errors, "hasExceptions": any(s["hasExceptions"] for s in members),
                          "eventCount": min(sum(s["eventCount"] for s in members), 9007199254740991)})
     return sorted(requests, key=_request_order)

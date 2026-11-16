@@ -216,6 +216,7 @@ public final class DistributedSmoke {
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("applicationId", caller ? "distributed-caller" : "distributed-receiver");
         config.put("applicationVersion", "SMOKE");
+        config.put("httpIncludePaths", Collections.singletonList("/api"));
         config.put("packages", Arrays.asList("com.example.distributed"));
         config.put("instrumentExecutors", false);
         config.put("instrumentMessaging", false);
@@ -231,7 +232,6 @@ public final class DistributedSmoke {
             command.add("-javaagent:" + args[0] + "=standalone");
             command.add("-Dtracelens.configPath=" + configFile);
             command.add("-Dtracelens.port=0");
-            command.add("-Dtracelens.http.includePaths=/api");
         }
         command.add("-Dfixture.downstream=" + (downstream == null ? "" : downstream.url));
         command.add("-Dfixture.redirectTarget=" + disallowedUrl);

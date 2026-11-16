@@ -92,6 +92,8 @@ public final class StandaloneSmoke {
     private void verifyMetadataOnly() throws Exception {
         require(System.getProperty("tracelens.configPath") == null, "metadata test accidentally supplied a config file");
         require(System.getProperty("tracelens.packages") == null, "metadata test accidentally supplied scope");
+        require(debug("/summary").json().path("httpIncludePaths").equals(JSON.readTree("[\"/\"]")),
+                "zero-config HTTP scope did not retain its default");
         Response response = app("/api/item");
         require(response.code == 200 && response.traceId != null && response.body.equals("GET:12:" + response.traceId),
                 "agent without config/filter did not trace servlet request");
@@ -108,6 +110,10 @@ public final class StandaloneSmoke {
         JsonNode summary = debug("/summary").json();
         require(summary.path("agentActive").asBoolean(), "standalone agent is not active");
         require(summary.path("traceCount").asInt() == 0, "store not initially empty");
+        require(summary.path("httpIncludePaths").equals(JSON.readTree("[\"/api\"]")),
+                "standalone summary did not report JSON HTTP capture scope");
+        require(debug("/metadata").json().path("httpIncludePaths").equals(summary.path("httpIncludePaths")),
+                "standalone metadata did not report the effective HTTP capture scope");
         require(debug("/metadata").json().path("applicationId").asText().equals("standalone-smoke"),
                 "standalone runtime ignored configuration");
         require(app("/tracelens/summary").body.equals("APPLICATION"), "agent hijacked an application route");

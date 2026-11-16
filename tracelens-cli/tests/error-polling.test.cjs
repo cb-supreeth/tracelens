@@ -7,6 +7,8 @@ const vm = require("node:vm");
 test("Errors polling replaces ordinary list reads and never exports execution data", async () => {
   const nodes = new Map(), reads = [];
   let ui, tick, errors = 0;
+  const element = () => ({classList: {toggle() {}, add() {}, remove() {}}, childNodes: [],
+    replaceChildren(...children) { this.childNodes = children; }});
   const context = {
     window: { TraceLensRequestUI: class {
       constructor(options) { this.options = options; this.mode = "errors"; ui = this; }
@@ -15,10 +17,11 @@ test("Errors polling replaces ordinary list reads and never exports execution da
     } },
     document: {
       querySelector(selector) {
-        if (!nodes.has(selector)) nodes.set(selector, {classList: {toggle() {}, add() {}, remove() {}}});
+        if (!nodes.has(selector)) nodes.set(selector, element());
         return nodes.get(selector);
       },
       querySelectorAll() { return []; },
+      createElement: element,
     },
     URLSearchParams,
     setInterval(callback) { tick = callback; return 0; },

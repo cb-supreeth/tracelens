@@ -5,7 +5,8 @@ import pytest
 
 from tracelens_cli.client import DebugApiError
 from tracelens_cli.dependencies import (
-    MAX_EVENTS, MAX_EXTERNAL_CALLS, boundary_summary, destination, extract_boundaries, validate_aliases,
+    MAX_EVENTS, MAX_EXTERNAL_CALLS, MAX_WRAPPER_DEPTH, MAX_WRAPPER_THREADS, boundary_summary,
+    destination, extract_boundaries, sanitize_summary, validate_aliases,
 )
 from tracelens_cli.mcp_server import TraceLensMcpServer
 from tracelens_cli.services import Federation, Service, join_trace, load_services
@@ -75,6 +76,51 @@ def test_boundaries_survive_federation_without_raw_event_payloads():
         "database-route", "routing-marker", "live-replica")
     assert result["links"] == []
     assert client.exports == ["app-segment"]
+
+
+@pytest.mark.parametrize("kind,system,prefix", [
+    ("database", "clickhouse", "Database call"), ("database", "dynamodb", "Database call"),
+    ("cache", "redis", "Cache call"), ("external", "s3", "External boundary")])
+def test_data_clients_preserve_identity_without_sql_keys_payloads_or_remote_segments(kind, system, prefix):
+    raw = event("outbound", boundaryKind=kind, system=system, destination=None,
+                operation="get", status="OBSERVED", sql="SECRET", key="SECRET", value="SECRET")
+    journey = join_trace(TRACE_ID, [segment([raw])], [])
+    graph = build_visualization(journey)
+    dependency = next(node for node in graph["nodes"] if node["kind"] == "dependency-call")
+    assert dependency["boundaryKind"] == kind
+    assert dependency["system"] == system
+    assert dependency["destination"] is None
+    assert dependency["evidenceKind"] == "client-boundary"
+    assert dependency["label"].startswith(prefix)
+    assert dependency["downstreamState"] == "not-observed"
+    assert len(graph["nodes"]) == 2
+    assert [edge["kind"] for edge in graph["edges"]] == ["outbound"]
+    assert "SECRET" not in json.dumps(graph)
+
+
+@pytest.mark.parametrize("kind", ["database", "cache"])
+@pytest.mark.parametrize("evidence", [None, "unsupported", "wrapper-entry"])
+def test_data_kind_without_client_evidence_does_not_claim_a_client_call(kind, evidence):
+    raw = event("outbound", boundaryKind=kind, system="redis", evidenceKind=evidence)
+    graph = build_visualization(join_trace(TRACE_ID, [segment([raw])], []))
+    dependency = next(node for node in graph["nodes"] if node["kind"] == "dependency-call")
+    assert not dependency["label"].startswith(("Database call", "Cache call"))
+    if evidence == "wrapper-entry":
+        assert dependency["label"].startswith("Cache access" if kind == "cache" else "Wrapper entry")
+
+
+@pytest.mark.parametrize("kind,system,status", [
+    ("database", "clickhouse", "SUBMITTED"), ("cache", "redis", "ERROR")])
+def test_mcp_preserves_data_client_boundaries_without_invented_receiver(kind, system, status):
+    server = TraceLensMcpServer("http://unused", None)
+    server.discovery.clients = {"default": ReadOnlyClient(segment([
+        event("outbound", boundaryKind=kind, system=system, destination=None, status=status)]))}
+    result = server.tool_get_trace_visualization(TRACE_ID)
+    dependency = next(node for node in result["structuredContent"]["nodes"] if node["kind"] == "dependency-call")
+    assert (dependency["boundaryKind"], dependency["system"], dependency["status"]) == (kind, system, status)
+    assert dependency["destination"] is None
+    assert dependency["downstreamState"] == "not-observed"
+    assert len(result["structuredContent"]["nodes"]) == 2
 
 
 @pytest.mark.parametrize("receiver", ["unregistered", "down"])
@@ -231,3 +277,140 @@ def test_invalid_alias_configuration_rejected(aliases):
         validate_aliases(aliases)
     with pytest.raises(ValueError, match="dependencyAliases"):
         Service("app", "http://unused", dependency_aliases=aliases)
+
+
+CACHE_WRAPPER = "com.chargebee.ems.config.cache.ValkeyCacheService"
+
+
+def cache_method(seq, method="get", kind="METHOD_ENTER", **extra):
+    return {"seq": seq, "type": kind, "thread": "emsAsync-353",
+            "className": CACHE_WRAPPER, "methodName": method, **extra}
+
+
+def cache_client(seq, operation="get", **extra):
+    return {**event("outbound", boundaryKind="cache", system="redis", destination=None,
+                   operation=operation, status="OBSERVED"),
+            "seq": seq, "thread": "emsAsync-353", **extra}
+
+
+@pytest.mark.parametrize("method", ["get", "put", "evict"])
+def test_exact_audited_cache_wrapper_entry_is_weaker_metadata_only_evidence(method):
+    raw = cache_method(292, method, sourceLine="SECRET", message="SECRET",
+                       attributes={"key": "SECRET", "value": "SECRET", "status": "HIT"})
+    original = copy.deepcopy(raw)
+    projected = boundary_summary(raw)
+    assert projected == {
+        "boundaryKind": "cache", "system": "redis", "direction": "outbound",
+        "destination": None, "operation": method, "status": "OBSERVED",
+        "evidenceKind": "wrapper-entry", "errorType": None,
+        "eventSeq": 292, "thread": "emsAsync-353", "downstreamState": "not-observed"}
+    assert raw == original
+    assert sanitize_summary(projected) == {**projected, "destinationName": None}
+    assert "SECRET" not in json.dumps(projected)
+    graph = build_visualization(join_trace(TRACE_ID, [segment([raw])], []))
+    dependency = next(node for node in graph["nodes"] if node["kind"] == "dependency-call")
+    assert dependency["boundaryKind"] == "cache"
+    assert dependency["evidenceKind"] == "wrapper-entry"
+    assert dependency["label"].startswith("Cache access")
+    assert dependency["eventSeq"] == 292
+    assert dependency["ownerId"] is not None
+    assert len(graph["nodes"]) == 2
+    assert graph["edges"][0]["kind"] == "outbound"
+    assert "client-boundary" not in json.dumps(graph)
+
+
+@pytest.mark.parametrize("changes", [
+    {"className": "com.chargebee.ems.config.cache.SiteEpochService", "methodName": "currentEpoch"},
+    {"className": "com.example.ValkeyCacheService"},
+    {"className": CACHE_WRAPPER + "$$SpringCGLIB$$0"},
+    {"className": CACHE_WRAPPER.lower()},
+    {"className": None}, {"className": []},
+    {"methodName": "currentSubscriptionEpoch"}, {"methodName": "formatReadMs"},
+    {"methodName": "indexSubscriptionKey"}, {"methodName": "putSubscriptionEntitlement"},
+    {"methodName": "cacheHit"}, {"methodName": None}, {"methodName": []},
+    {"type": "METHOD_EXIT"}, {"type": "LINE"}, {"type": "EXCEPTION"}
+])
+def test_cache_fallback_never_guesses_from_names_helpers_or_non_entry_events(changes):
+    assert boundary_summary({**cache_method(1), **changes}) is None
+    assert extract_boundaries([{**cache_method(1), **changes}])[0] == []
+
+
+@pytest.mark.parametrize("method,operation", [("get", "get"), ("put", "set"), ("evict", "delete")])
+def test_typed_client_suppresses_only_its_matching_enclosing_cache_wrapper(method, operation):
+    events = [cache_method(1, method), cache_method(2, "helper", className="com.example.Helper"),
+              cache_client(3, operation), cache_method(4, "helper", "METHOD_EXIT", className="com.example.Helper"),
+              cache_method(5, method, "METHOD_EXIT")]
+    original = copy.deepcopy(events)
+    calls, limited = extract_boundaries(events)
+    assert not limited
+    assert len(calls) == 1
+    assert calls[0]["evidenceKind"] == "client-boundary"
+    assert calls[0]["eventSeq"] == 3 and calls[0]["eventIndex"] == 2
+    assert events == original
+
+
+def test_same_trace_thread_or_operation_does_not_establish_cache_dedup_without_nested_evidence():
+    cases = [
+        [cache_method(1), cache_method(2, kind="METHOD_EXIT"), cache_client(3)],
+        [cache_method(1), cache_method(2, kind="EXCEPTION"), cache_client(3)],
+        [cache_method(1), cache_client(2, thread="another-thread")],
+        [cache_method(1), cache_client(2, "set")],
+        [cache_method(1), cache_client(3)],
+        [cache_method(2), cache_client(1)],
+        [cache_method(1), None, cache_client(3)],
+        [cache_method(1), cache_method(2, "unknown", "METHOD_EXIT"), cache_client(3)],
+        [cache_method(1), cache_method(2, "unknown", thread=None), cache_client(3)],
+        [cache_method(1), cache_method(2, method=None), cache_client(3)],
+    ]
+    for events in cases:
+        calls, _ = extract_boundaries(events)
+        assert [call["evidenceKind"] for call in calls] == ["wrapper-entry", "client-boundary"], events
+
+
+def test_unrelated_typed_boundaries_do_not_suppress_cache_access():
+    for changes in [{"system": "clickhouse"}, {"boundaryKind": "database"},
+                    {"evidenceKind": "wrapper-entry"}, {"direction": "consume"}, {"status": "unknown"}]:
+        client = cache_client(2)
+        client["attributes"].update(changes)
+        calls, _ = extract_boundaries([cache_method(1), client])
+        assert len(calls) == 2
+        assert calls[0]["evidenceKind"] == "wrapper-entry"
+
+
+def test_repeated_wrappers_and_interleaved_threads_keep_only_matching_client_replacements():
+    events = [cache_method(1), cache_client(2), cache_method(3, kind="METHOD_EXIT"),
+              cache_method(4), cache_method(5, thread="other"),
+              cache_client(6, thread="other"), cache_method(7, kind="METHOD_EXIT", thread="other"),
+              cache_method(8, kind="METHOD_EXIT")]
+    calls, _ = extract_boundaries(events)
+    assert [(call["eventSeq"], call["evidenceKind"]) for call in calls] == [
+        (2, "client-boundary"), (4, "wrapper-entry"), (6, "client-boundary")]
+
+
+def test_nested_same_wrapper_replaces_only_nearest_frame_and_can_recover_after_gap():
+    events = [cache_method(1), cache_method(2), cache_client(3),
+              cache_method(4, kind="METHOD_EXIT"), cache_method(5, kind="METHOD_EXIT")]
+    calls, _ = extract_boundaries(events)
+    assert [(call["eventSeq"], call["evidenceKind"]) for call in calls] == [
+        (1, "wrapper-entry"), (3, "client-boundary")]
+    events = [cache_method(1), cache_method(3), cache_client(4)]
+    calls, _ = extract_boundaries(events)
+    assert [(call["eventSeq"], call["evidenceKind"]) for call in calls] == [
+        (1, "wrapper-entry"), (4, "client-boundary")]
+
+
+def test_cache_wrapper_suppression_bounds_do_not_hide_actual_typed_client_evidence():
+    deep = [cache_method(1)]
+    deep.extend(cache_method(i + 2, "helper", className="com.example.Helper")
+                for i in range(MAX_WRAPPER_DEPTH))
+    deep.append(cache_client(len(deep) + 1))
+    calls, limited = extract_boundaries(deep)
+    assert limited
+    assert [call["evidenceKind"] for call in calls] == ["wrapper-entry", "client-boundary"]
+    threads = [cache_method(1)]
+    threads.extend(cache_method(i + 2, "helper", className="com.example.Helper", thread=f"thread-{i}")
+                   for i in range(MAX_WRAPPER_THREADS))
+    threads.append(cache_client(len(threads) + 1))
+    calls, limited = extract_boundaries(threads)
+    assert limited
+    assert [call["evidenceKind"] for call in calls] == ["wrapper-entry", "client-boundary"]

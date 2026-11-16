@@ -11,8 +11,8 @@ import net.bytebuddy.asm.Advice;
  * no extra class loading on the hot path.
  *
  * The current application matcher excludes constructors. Exceptions here mean
- * exceptional method exits, not every thrown/caught exception. Advice does not
- * suppress failures from the basic tracing callbacks.
+ * exceptional method exits, not every thrown/caught exception. Advice suppresses
+ * observer failures, including exception-message extraction.
  */
 public final class MethodTraceAdvice {
 
@@ -21,42 +21,47 @@ public final class MethodTraceAdvice {
 
     /** enter + exit, exceptions become EXCEPTION events (trackMethods && trackExceptions). */
     public static final class Full {
-        @Advice.OnMethodEnter
-        public static void enter(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method) {
-            TraceRuntime.onMethodEnter(type, method);
+        @Advice.OnMethodEnter(suppress = Throwable.class)
+        public static void enter(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method,
+                                 @Advice.Origin("#d") String descriptor) {
+            TraceRuntime.onMethodEnter(type, method, descriptor);
         }
 
-        @Advice.OnMethodExit(onThrowable = Throwable.class)
+        @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
         public static void exit(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method,
+                                @Advice.Origin("#d") String descriptor,
                                 @Advice.Thrown Throwable thrown) {
             if (thrown == null) {
-                TraceRuntime.onMethodExit(type, method);
+                TraceRuntime.onMethodExit(type, method, descriptor);
             } else {
-                TraceRuntime.onException(type, method, thrown.getClass().getName(), thrown.getMessage());
+                TraceRuntime.onException(type, method, descriptor, thrown.getClass().getName(), thrown.getMessage());
             }
         }
     }
 
     /** enter + exit, exceptions propagate silently (trackMethods && !trackExceptions). */
     public static final class NoExceptions {
-        @Advice.OnMethodEnter
-        public static void enter(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method) {
-            TraceRuntime.onMethodEnter(type, method);
+        @Advice.OnMethodEnter(suppress = Throwable.class)
+        public static void enter(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method,
+                                 @Advice.Origin("#d") String descriptor) {
+            TraceRuntime.onMethodEnter(type, method, descriptor);
         }
 
-        @Advice.OnMethodExit
-        public static void exit(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method) {
-            TraceRuntime.onMethodExit(type, method);
+        @Advice.OnMethodExit(suppress = Throwable.class)
+        public static void exit(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method,
+                                @Advice.Origin("#d") String descriptor) {
+            TraceRuntime.onMethodExit(type, method, descriptor);
         }
     }
 
     /** exceptions only (!trackMethods && trackExceptions). */
     public static final class ExceptionsOnly {
-        @Advice.OnMethodExit(onThrowable = Throwable.class)
+        @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
         public static void exit(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method,
+                                @Advice.Origin("#d") String descriptor,
                                 @Advice.Thrown Throwable thrown) {
             if (thrown != null) {
-                TraceRuntime.onException(type, method, thrown.getClass().getName(), thrown.getMessage());
+                TraceRuntime.onException(type, method, descriptor, thrown.getClass().getName(), thrown.getMessage());
             }
         }
     }

@@ -56,8 +56,7 @@ def agentJar = project(':tracelens-agent').tasks.named('shadowJar')
             jvmArgs "-javaagent:${agentJar.get().archiveFile.get().asFile.absolutePath}",
                     "-Dtracelens.configPath=${file('src/java8Smoke/resources/tracelens-servlet-smoke.json').absolutePath}",
                     "-Dtracelens.enabled=${mode == 'Enabled'}",
-                    '-Dsun.net.http.allowRestrictedHeaders=true',
-                    '-Dtracelens.http.includePaths=/api'
+                    '-Dsun.net.http.allowRestrictedHeaders=true'
         }
     }
 }

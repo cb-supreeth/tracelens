@@ -1,0 +1,13 @@
+.request-insights { border: 1px solid var(--border, #334155); border-radius: 8px; padding: 12px 14px; margin: 12px 0; font-size: 12px; }
+.request-insights h2 { font-size: 13px; margin: 0 0 8px; }
+.request-insights ul { list-style: none; margin: 0; padding: 0; }
+.request-insights-item + .request-insights-item { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border, #334155); }
+.request-insights-item strong { font-weight: 600; overflow-wrap: anywhere; }
+.request-insights-item p { margin: 3px 0 6px; color: var(--muted, #a3b0c2); font-size: 11px; }
+.request-insights-action { font-size: 11px; padding: 4px 8px; white-space: normal; }
+.request-insights details { margin-top: 9px; }
+.request-insights details > summary { cursor: pointer; }
+.request-insights details[open] > summary { margin-bottom: 8px; }
+.request-insights-capture li { padding: 3px 0; overflow-wrap: anywhere; font-size: 11px; }
+.request-insights-limit, .request-insights-feedback { color: var(--muted, #a3b0c2); font-size: 11px; margin: 8px 0 0; }
+.request-insights button:focus-visible, .request-insights summary:focus-visible { outline: 2px solid var(--accent, #79b7ff); outline-offset: 3px; }

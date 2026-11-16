@@ -1,0 +1,40 @@
+{
+  "applicationId": "cb-grant-orchestrator",
+  "applicationVersion": "LOCAL",
+  "httpIncludePaths": ["/api/v2", "/micro_service"],
+  "packages": [
+    "com.chargebee.app.sandbox", "com.chargebee.app.api.grant_orchestrator",
+    "com.chargebee.app.service", "com.chargebee.app.repository",
+    "com.chargebee.app.integrations", "com.chargebee.app.overdraft_billing",
+    "com.chargebee.app.grant_workflow", "com.chargebee.app.adapter",
+    "com.chargebee.app.adaptors"
+  ],
+  "blacklistedNodes": ["ToStringBuilder"],
+  "capturePayloads": false,
+  "captureJdbcQueries": true,
+  "captureJdbcParameters": false,
+  "maxSqlLength": 4096,
+  "maxSqlQueriesPerRequest": 100,
+  "maxTrackedEvents": 100000,
+  "maxTrackedRequests": 100,
+  "httpRetentionPercent": 75,
+  "idleTtlMinutes": 30,
+  "evictOnExport": false,
+  "trackMethods": true,
+  "trackExceptions": true,
+  "instrumentExecutors": true,
+  "instrumentMessaging": false,
+  "captureMessagingBoundaries": true,
+  "captureDataStoreBoundaries": true,
+  "instrumentScheduled": false,
+  "chargebeeJobTypes": [],
+  "requireLabels": false,
+  "distributedTracingEnabled": true,
+  "httpClientCaptureEnabled": true,
+  "httpPropagationAllowedDestinations": [
+    "127.0.0.1:9187", "localhost:9187", "localcb.in:9187",
+    "127.0.0.1:8082", "localhost:8082", "localcb.in:8082",
+    "127.0.0.1:8080", "localhost:8080", "localcb.in:8080",
+    "mannar-test.localcb.in:8080"
+  ]
+}

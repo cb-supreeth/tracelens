@@ -1,0 +1,49 @@
+/* Sibling controls: asking for help never activates a tab or disclosure. */
+.context-help-host { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.context-help-host.workflow-tool { display: block; }
+button.context-help-info,
+.list-tabs button.context-help-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dim);
+  cursor: help;
+}
+.context-help-info svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.list-tabs button.context-help-info:hover,
+button.context-help-info:hover { color: var(--fg); background: var(--panel); border-color: var(--border); }
+.list-tabs button.context-help-info:focus-visible,
+button.context-help-info:focus-visible { color: var(--fg); outline: 2px solid var(--accent); outline-offset: 2px; }
+/* JS anchors the sibling icon to the intrinsic summary, not the expanded panel. */
+.workflow-tool > .context-help-info { position: absolute; top: 8px; }
+.context-help-tooltip {
+  position: fixed;
+  z-index: 100;
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--fg);
+  box-shadow: 0 8px 28px #0006;
+  font: 13px/1.55 var(--sans, system-ui, sans-serif);
+  overflow-wrap: anywhere;
+}
+.context-help-tooltip[hidden] { display: none; }
+.context-help-tooltip strong { display: block; font-size: 14px; font-weight: 600; margin-bottom: 5px; }
+.context-help-tooltip p { margin: 0; color: var(--fg); }
+@media (pointer: coarse) {
+  button.context-help-info, .list-tabs button.context-help-info { width: 44px; height: 44px; }
+  .workflow-tool > details > summary { min-height: 52px; padding-right: 60px; }
+}

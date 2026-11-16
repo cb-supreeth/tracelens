@@ -17,7 +17,6 @@ import java.io.File;
 import java.lang.instrument.Instrumentation;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.jar.JarFile;
 
@@ -78,6 +77,8 @@ public final class TraceLensAgent {
 
         TraceLensConfig config = resolveConfig(standalone);
         injectIntoBootstrap(inst);
+        reportBuildIdentity();
+        AgentStatus.configureIntegration("application-code", !config.getPackages().isEmpty());
         if (standalone && !StandaloneRuntime.start(config)) return;
 
         ElementMatcher.Junction<TypeDescription> typeMatcher = scopeMatcher(config);
@@ -148,6 +149,7 @@ public final class TraceLensAgent {
                                                  JavaModule module, boolean loaded, DynamicType dynamicType) {
                         INSTRUMENTED_CLASSES.incrementAndGet();
                         AgentStatus.noteInstrumentedClass(typeDescription.getName());
+                        AgentStatus.integrationTransformed("application-code");
                         dumpClass(typeDescription, dynamicType);
                     }
 
@@ -161,6 +163,7 @@ public final class TraceLensAgent {
                                         boolean loaded, Throwable throwable) {
                         FAILED_CLASSES.incrementAndGet();
                         AgentStatus.noteFailedClass();
+                        AgentStatus.integrationFailed("application-code");
                         log("FAILED to instrument " + typeName + ": " + throwable);
                     }
 
@@ -170,18 +173,53 @@ public final class TraceLensAgent {
                 })
                 .installOn(inst);
 
+        AgentStatus.integrationInstalled("application-code");
+
         if (config.isInstrumentExecutors()) {
             installExecutorInstrumentation(inst);
         }
+        ChargebeeJobInstrumentation.install(inst, config.getChargebeeJobTypes());
         com.chargebee.tracelens.bridge.MessagingBoundaryRuntime.configure(
                 config.isCaptureMessagingBoundaries(), config.isInstrumentMessaging());
         if (config.isInstrumentMessaging() || config.isCaptureMessagingBoundaries()) {
             installMessagingInstrumentation(inst);
         }
+        DataStoreInstrumentation.install(inst, config.isCaptureDataStoreBoundaries());
+        JdbcInstrumentation.install(inst, config.isCaptureJdbcQueries(),
+                config.getMaxSqlLength(), config.getMaxSqlQueriesPerRequest(), config.isCaptureJdbcParameters());
+        ClickHouseInstrumentation.install(inst, config.isCaptureClickHouseQueries(),
+                config.getMaxSqlLength(), config.getMaxSqlQueriesPerRequest(), config.isCaptureClickHouseParameters());
+        if (config.isCaptureClickHouseQueries()) {
+            log("RAW native ClickHouse SQL capture enabled for local debugging; SQL literals may contain sensitive data. "
+                    + (config.isCaptureClickHouseParameters() ? "Named binding capture is enabled. " : "Bindings are not captured. ")
+                    + "Query results are not captured.");
+        }
+        if (config.isCaptureJdbcQueries()) {
+            log("RAW JDBC SQL capture enabled for local debugging; SQL literals may contain sensitive data. "
+                    + (config.isCaptureJdbcParameters() ? "Bound parameter capture is enabled. " : "Bound parameters are not captured. ")
+                    + "Result rows are not captured.");
+        }
         if (standalone) {
+            if (config.isCaptureHttpQueryParameters() || config.isCaptureHttpRequestBodies()) {
+                log("Incoming HTTP request evidence capture enabled for local debugging. "
+                        + (config.isRedactHttpPayloads()
+                        ? "Sensitive-field redaction is best-effort; review captures before sharing."
+                        : "UNREDACTED query/body capture: credentials and other sensitive fields may be retained in exports and saved snapshots. Keep captures local."));
+            }
             HttpInstrumentation.install(inst);
+            if (config.isCaptureHttpRequestBodies()) {
+                try { HttpRequestBodyInstrumentation.install(inst); }
+                catch (Throwable unavailable) {
+                    AgentStatus.noteFailedClass();
+                    log("HTTP request body instrumentation unavailable: " + unavailable.getClass().getName());
+                }
+            }
+            VertxHttpInstrumentation.install(inst);
             HttpIdentityInstrumentation.install(inst, config.getHttpIdentityHooks());
-            if (config.isHttpClientCaptureEnabled()) HttpClientInstrumentation.install(inst);
+            if (config.isHttpClientCaptureEnabled()) {
+                HttpClientInstrumentation.install(inst);
+                ApacheHttpClientInstrumentation.install(inst);
+            }
         }
 
         long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
@@ -193,6 +231,28 @@ public final class TraceLensAgent {
                 + " instrumentExecutors=" + config.isInstrumentExecutors());
 
         Runtime.getRuntime().addShutdownHook(new Thread(TraceLensAgent::printSummary, "tracelens-summary"));
+    }
+
+    private static void reportBuildIdentity() {
+        try {
+            java.security.CodeSource source = TraceLensAgent.class.getProtectionDomain().getCodeSource();
+            if (source == null || !"file".equals(source.getLocation().getProtocol())) return;
+            java.nio.file.Path path = java.nio.file.Paths.get(source.getLocation().toURI());
+            if (!java.nio.file.Files.isRegularFile(path) || java.nio.file.Files.size(path) > 128L * 1024 * 1024) return;
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            long deadline = System.nanoTime() + 2_000_000_000L;
+            try (java.io.InputStream input = java.nio.file.Files.newInputStream(path)) {
+                byte[] buffer = new byte[8192]; int count; long bytes = 0;
+                while ((count = input.read(buffer)) != -1) {
+                    bytes += count;
+                    if (bytes > 128L * 1024 * 1024 || System.nanoTime() > deadline) return;
+                    digest.update(buffer, 0, count);
+                }
+            }
+            StringBuilder value = new StringBuilder(64);
+            for (byte item : digest.digest()) value.append(Character.forDigit((item & 255) >>> 4, 16)).append(Character.forDigit(item & 15, 16));
+            AgentStatus.reportBuildId(value.toString());
+        } catch (Exception unavailable) { /* Unreported provenance must not prevent application startup. */ }
     }
 
     public static void agentmain(String args, Instrumentation inst) {
@@ -247,12 +307,15 @@ public final class TraceLensAgent {
     }
 
     /**
-     * Task wrapping at executor hand-off points (OTel's executors module equivalent).
+     * Identity-preserving context association at supported executor hand-off points.
      * JDK classes are already loaded when premain runs, so this needs retransformation.
      * Failure here must not kill line capture — log and move on.
      */
     private static void installExecutorInstrumentation(Instrumentation inst) {
         try {
+            // Verify bootstrap helper visibility before modifying JDK execution paths.
+            Class.forName("com.chargebee.tracelens.bridge.ExecutorTraceRuntime", true, null);
+            Class.forName("java.util.concurrent.ThreadPoolExecutor", true, null);
             AgentBuilder.RedefinitionStrategy.Listener redefinitionErrors =
                     new AgentBuilder.RedefinitionStrategy.Listener() {
                         @Override
@@ -287,28 +350,30 @@ public final class TraceLensAgent {
                     // bootstrap/extension-loaded types — which is exactly where JDK
                     // executors live. Override to keep only the self-protection rules.
                     .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
+                    .with(new AgentBuilder.Listener.Adapter() {
+                        @Override public void onTransformation(TypeDescription type, ClassLoader loader,
+                                                               JavaModule module, boolean loaded, DynamicType dynamicType) {
+                            log("executor hooks transformed " + type.getName());
+                        }
+                        @Override public void onError(String typeName, ClassLoader loader, JavaModule module,
+                                                      boolean loaded, Throwable failure) {
+                            AgentStatus.noteFailedClass();
+                            log("executor instrumentation error for " + typeName + ": " + failure);
+                        }
+                    })
                     .type(named("java.util.concurrent.ThreadPoolExecutor"))
                     .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
-                            builder.visit(Advice.to(ExecutorTraceAdvice.WrapRunnable.class)
-                                    .on(named("execute").and(takesArgument(0, Runnable.class)))))
+                            builder.visit(Advice.to(ExecutorTraceAdvice.Submit.class)
+                                    .on(named("execute").and(takesArgument(0, Runnable.class))))
+                                    .visit(Advice.to(ExecutorTraceAdvice.Before.class).on(named("beforeExecute")))
+                                    .visit(Advice.to(ExecutorTraceAdvice.After.class).on(named("afterExecute")))
+                                    .visit(Advice.to(ExecutorTraceAdvice.Reject.class).on(named("reject")))
+                                    .visit(Advice.to(ExecutorTraceAdvice.Remove.class).on(named("remove")))
+                                    .visit(Advice.to(ExecutorTraceAdvice.Purge.class).on(named("purge")))
+                                    .visit(Advice.to(ExecutorTraceAdvice.Stop.class).on(named("shutdownNow"))))
                     .installOn(inst);
 
-            new AgentBuilder.Default()
-                    .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
-                    .with(redefinitionErrors)
-                    .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
-                    .ignore(nameStartsWith("net.bytebuddy.").or(isSynthetic()))
-                    .type(named("java.util.concurrent.ScheduledThreadPoolExecutor"))
-                    .transform((builder, typeDescription, classLoader, module, protectionDomain) ->
-                            builder
-                                    .visit(Advice.to(ExecutorTraceAdvice.WrapRunnable.class)
-                                            .on(named("schedule").and(takesArgument(0, Runnable.class))
-                                                    .or(named("scheduleAtFixedRate"))
-                                                    .or(named("scheduleWithFixedDelay"))))
-                                    .visit(Advice.to(ExecutorTraceAdvice.WrapCallable.class)
-                                            .on(named("schedule").and(takesArgument(0, Callable.class)))))
-                    .installOn(inst);
-            log("executor instrumentation installed (ThreadPoolExecutor, ScheduledThreadPoolExecutor)");
+            log("executor instrumentation installed (exact ThreadPoolExecutor with exact LinkedBlockingQueue/ArrayBlockingQueue/SynchronousQueue; other executors/queues require explicit context wrappers)");
         } catch (Throwable t) {
             log("executor instrumentation failed (continuing without it): " + t);
         }

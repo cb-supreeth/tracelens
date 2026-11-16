@@ -76,3 +76,34 @@ def test_out_of_range_line_returns_none(repo):
 
 def test_negative_line_returns_none(repo):
     assert source.source_line("com.chargebee.ems.Foo", -1, repo) is None
+
+
+def test_source_refreshes_after_edit(repo):
+    assert source.source_line("com.chargebee.ems.Foo", 2, repo) == "class Foo {"
+    path = Path(repo) / "src/main/java/com/chargebee/ems/Foo.java"
+    path.write_text("package com.chargebee.ems;\nclass UpdatedFoo { }\n")
+    assert source.source_line("com.chargebee.ems.Foo", 2, repo) == "class UpdatedFoo { }"
+
+
+def test_source_location_is_explicit_current_checkout(repo):
+    result = source.source_location("com.chargebee.ems.Foo$Inner", 5, repo)
+    assert result["sourceCorrespondence"] == "unverified"
+    assert result["path"].endswith("/Foo.java")
+    assert result["editors"]["cursor"].startswith("cursor://file/")
+    assert result["editors"]["vscode"].endswith(":5")
+    assert source.source_location("com.chargebee.ems.Foo", 9999, repo) is None
+
+
+@pytest.mark.parametrize("fqcn", ["../secret", "/etc/passwd", "com/foo", "a..B", "x?" ])
+def test_source_rejects_path_input(repo, fqcn):
+    assert source.source_location(fqcn, 1, repo) is None
+    assert source.source_line(fqcn, 1, repo) is None
+
+
+def test_source_rejects_symlink_escape(tmp_path):
+    root = tmp_path / "checkout"
+    root.mkdir()
+    (tmp_path / "Secret.java").write_text("private source")
+    (root / "Secret.java").symlink_to(tmp_path / "Secret.java")
+    assert source.source_location("Secret", 1, str(root)) is None
+    assert source.source_line("Secret", 1, str(root)) is None

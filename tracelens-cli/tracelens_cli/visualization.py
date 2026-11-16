@@ -19,7 +19,7 @@ from .dependencies import sanitize_summary
 
 MAX_SEGMENTS = 128
 MAX_CALLS = 128
-MAX_DEPENDENCIES = 128
+MAX_DEPENDENCIES = 512
 MAX_EDGES = 512
 MAX_INPUT_ROWS = 8192
 MAX_WARNINGS = 128
@@ -117,13 +117,15 @@ def _base_node(row, kind):
 
 def _label(node):
     if node["kind"] == "segment":
-        route = " ".join(p for p in (node["method"] or node["entryChannel"], node["path"]) if p)
+        route = " ".join(p for p in (node["method"] or node["entryChannel"], node["path"] or node.get("jobType")) if p)
         return _text(f"{node['service'] or 'Unknown service'} · {route or 'Segment'}", MAX_LABEL)
     if node["kind"] == "dependency-call":
         if node["boundaryKind"] == "database-route":
             prefix = "Database route"
         elif node["evidenceKind"] == "wrapper-entry":
-            prefix = "Wrapper entry"
+            prefix = "Cache access" if node["boundaryKind"] == "cache" else "Wrapper entry"
+        elif node["evidenceKind"] == "client-boundary" and node["boundaryKind"] in ("database", "cache"):
+            prefix = "Database call" if node["boundaryKind"] == "database" else "Cache call"
         else:
             prefix = "Messaging" if node["boundaryKind"] == "messaging" else "External boundary"
         detail = " ".join(value for value in (node["system"], node["operation"] or node["direction"]) if value)
@@ -150,6 +152,9 @@ def _prepare(rows, kind, source_field, limit, warn):
             node = _base_node(row, kind)
         if kind == "segment":
             node["parentSpanId"] = _text(row.get("parentSpanId"))
+            if node["entryChannel"] == "SCHEDULER":
+                node.update({key: _field(row, key) for key in (
+                    "jobType", "jobId", "jobOutcome", "jobAuditStatus", "jobFailureType", "scheduler")})
         else:
             node.update(callKey=_text(row.get("callKey"), MAX_KEY), ownerId=None,
                         segmentId=None, segmentKey=_text(row.get("ownerSegmentKey"), MAX_KEY),
@@ -157,6 +162,14 @@ def _prepare(rows, kind, source_field, limit, warn):
             if kind == "http-call":
                 node.update(peer=_text(row.get("peer")), propagationStatus=_text(row.get("propagationStatus")),
                             destinationName=_text(row.get("destinationName"), 128))
+                # Caller-local timestamps are display-order evidence only. Never
+                # compare clocks across services or use them to establish links.
+                started = _integer(row.get("startedAtMillis", row.get("startedAt")))
+                if started is not None and started <= 9_007_199_254_740_991:
+                    node["startedAtMillis"] = started
+                timing = _text(row.get("timingBoundary"))
+                if timing:
+                    node["timingBoundary"] = timing
         node["label"] = _label(node)
         # Exact ownership is identity-relevant when duplicate call keys exist;
         # display cleanup must not make two different source owners identical.

@@ -1,6 +1,7 @@
 {
   "applicationId": "cb-app-servlet-smoke",
   "applicationVersion": "LOCAL",
+  "httpIncludePaths": ["/api"],
   "packages": ["com.chargebee.legacyfixture"],
   "evictOnExport": true,
   "capturePayloads": false,

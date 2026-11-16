@@ -21,6 +21,7 @@ import json
 import sys
 import time
 
+from . import __version__
 from .client import DebugApiError, TraceLensClient
 from .render import render
 from .services import Federation, Service, load_services
@@ -29,6 +30,7 @@ from .services import Federation, Service, load_services
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tracelens",
                                      description="TraceLens debug-API CLI")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     connection = parser.add_mutually_exclusive_group()
     connection.add_argument("--url", default="http://localhost:8082",
                         help="service base URL (default: http://localhost:8082)")
@@ -45,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     p_doctor.add_argument("--source-root", help="optional local source checkout to check in single-service mode")
     p_investigate = sub.add_parser("investigate", help="find one API/scenario and summarize observed evidence")
     _request_arguments(p_investigate)
+    p_diagnose = sub.add_parser("diagnose", help="read-only capture checks for one exact backend API path")
+    p_diagnose.add_argument("--path", required=True, help="exact backend path, without URL, query or wildcards")
+    p_diagnose.add_argument("--method", help="HTTP method")
+    p_diagnose.add_argument("--user", help="exact observed user identity")
+    p_diagnose.add_argument("--site", help="exact observed site identity")
     p_capture = sub.add_parser("capture", help="explicit local evidence snapshots; no database")
     capture_commands = p_capture.add_subparsers(dest="capture_command", required=True)
     p_save = capture_commands.add_parser("save", help="save selected request evidence before restart/eviction")
@@ -55,6 +62,11 @@ def main(argv: list[str] | None = None) -> int:
     p_compare = capture_commands.add_parser("compare", help="compare two saved runs, offline")
     p_compare.add_argument("before", help="capture ID or unique exact saved name")
     p_compare.add_argument("after", help="capture ID or unique exact saved name")
+    p_capture_search = capture_commands.add_parser("search", help="search minimized saved evidence offline")
+    p_capture_search.add_argument("query", help="literal printable query, 1–128 characters")
+    p_capture_search.add_argument("--category", choices=("class", "method", "exception", "destination"),
+                                  help="evidence category (default: all four)")
+    p_capture_search.add_argument("--limit", type=int, default=50, help="maximum results, 1–100 (default: 50)")
 
     p_export = sub.add_parser("export", help="raw export JSON for a trace")
     p_export.add_argument("trace_id")
@@ -84,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
     p_serve.add_argument("--port", type=int, default=7777)
     p_serve.add_argument("--source-root", default=None,
                          help="local checkout for source lines (default: ~/work/cb-ems)")
+    p_serve.add_argument("--snapshot-dir", default=None,
+                         help="private viewer snapshot root (default: ~/.tracelens/viewer-snapshots; separate from CLI captures)")
 
     p_mcp = sub.add_parser("mcp", help="MCP server (stdio) — query flows from Cursor/agents")
     p_mcp.add_argument("--source-root", default=None,
@@ -117,7 +131,7 @@ def _dispatch(args, client: TraceLensClient) -> int:
         if federation:
             return client.export(args.trace_id, service=args.service, instance=args.instance)
         return client.export(args.trace_id, evict=False)
-    if cmd in ("doctor", "investigate", "capture"):
+    if cmd in ("doctor", "investigate", "diagnose", "capture"):
         from .captures import CaptureStore
         from .doctor import run_doctor
         from .investigation import investigate_request
@@ -132,11 +146,19 @@ def _dispatch(args, client: TraceLensClient) -> int:
             result = investigate_request(discovery, **_request_filters(args))
             _print_json(result)
             return 0 if result["status"] == "selected" else 2
+        if cmd == "diagnose":
+            from .guided_investigation import diagnose_request
+            _print_json(diagnose_request(discovery, path=args.path, method=args.method,
+                                         service=args.service, user=args.user, site=args.site))
+            return 0
         store = CaptureStore(args.capture_dir or default_capture_dir())
         if args.capture_command == "list":
             _print_json(store.list())
         elif args.capture_command == "compare":
             _print_json(compare_saved_captures(store, args.before, args.after))
+        elif args.capture_command == "search":
+            from .capture_tools import search_saved_evidence
+            _print_json(search_saved_evidence(None, store, args.query, args.category, args.limit))
         else:
             result = save_request_capture(discovery, store, args.name, args.revision, **_request_filters(args))
             _print_json(result)
@@ -166,7 +188,8 @@ def _dispatch(args, client: TraceLensClient) -> int:
         return _tail(client, args.interval)
     elif cmd == "serve":
         from . import server
-        return server.serve(args.port, args.url, args.source_root, args.service_registry)
+        return server.serve(args.port, args.url, args.source_root, args.service_registry, args.snapshot_dir,
+                            capture_dir=args.capture_dir)
     elif cmd == "mcp":
         from . import mcp_server
         return mcp_server.serve(args.url, args.source_root, args.service_registry, args.viewer_url, args.capture_dir)
@@ -188,7 +211,7 @@ def _request_arguments(parser) -> None:
     parser.add_argument("--user", help="user substring")
     parser.add_argument("--label", help="recorded reproduction/scenario label filter")
     parser.add_argument("--since-minutes", type=float, default=10)
-    parser.add_argument("--outcome", choices=("all", "error", "success", "active", "unknown"), default="all")
+    parser.add_argument("--outcome", choices=("all", "error", "success", "skipped", "active", "unknown"), default="all")
     parser.add_argument("--selection", choices=("unique", "latest"), default="unique",
                         help="unique refuses ambiguous matches; latest is an explicit opt-in")
 

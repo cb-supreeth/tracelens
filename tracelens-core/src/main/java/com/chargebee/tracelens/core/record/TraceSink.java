@@ -3,6 +3,7 @@ package com.chargebee.tracelens.core.record;
 import com.chargebee.tracelens.bridge.TraceRuntime;
 import com.chargebee.tracelens.core.event.EventType;
 import com.chargebee.tracelens.core.event.TraceEvent;
+import com.chargebee.tracelens.core.event.RuntimeThreadIdentity;
 import com.chargebee.tracelens.core.store.TraceStore;
 
 import java.util.Map;
@@ -31,28 +32,48 @@ public final class TraceSink implements TraceRuntime.Sink {
 
     @Override
     public void onLine(String traceId, String fqcn, int line) {
-        store.appendEvent(traceId, TraceEvent.line(0, System.currentTimeMillis(), System.nanoTime(),
-                Thread.currentThread().getName(), fqcn, line));
+        if (!store.acceptsDetail(traceId, EventType.LINE)) { store.recordDetailOmission(traceId, EventType.LINE); return; }
+        store.appendEvent(traceId, event(EventType.LINE).className(fqcn).line(line).build());
     }
 
     @Override
     public void onMethodEnter(String traceId, String fqcn, String method) {
-        store.appendEvent(traceId, TraceEvent.method(0, System.currentTimeMillis(), System.nanoTime(),
-                Thread.currentThread().getName(), com.chargebee.tracelens.core.event.EventType.METHOD_ENTER,
-                fqcn, method));
+        onMethodEnter(traceId, fqcn, method, null);
+    }
+
+    @Override
+    public void onMethodEnter(String traceId, String fqcn, String method, String descriptor) {
+        if (!store.acceptsDetail(traceId)) { store.recordDetailOmission(traceId); return; }
+        store.appendEvent(traceId, event(EventType.METHOD_ENTER).className(fqcn).methodName(method)
+                .methodDescriptor(descriptor).build());
     }
 
     @Override
     public void onMethodExit(String traceId, String fqcn, String method) {
-        store.appendEvent(traceId, TraceEvent.method(0, System.currentTimeMillis(), System.nanoTime(),
-                Thread.currentThread().getName(), com.chargebee.tracelens.core.event.EventType.METHOD_EXIT,
-                fqcn, method));
+        onMethodExit(traceId, fqcn, method, null);
+    }
+
+    @Override
+    public void onMethodExit(String traceId, String fqcn, String method, String descriptor) {
+        if (!store.acceptsDetail(traceId)) { store.recordDetailOmission(traceId); return; }
+        store.appendEvent(traceId, event(EventType.METHOD_EXIT).className(fqcn).methodName(method)
+                .methodDescriptor(descriptor).build());
     }
 
     @Override
     public void onException(String traceId, String fqcn, String method, String exceptionType, String message) {
-        store.appendEvent(traceId, TraceEvent.exception(0, System.currentTimeMillis(), System.nanoTime(),
-                Thread.currentThread().getName(), fqcn, method, exceptionType, message));
+        onException(traceId, fqcn, method, null, exceptionType, message);
+    }
+
+    @Override
+    public void onException(String traceId, String fqcn, String method, String descriptor, String exceptionType, String message) {
+        store.appendEvent(traceId, event(EventType.EXCEPTION).className(fqcn).methodName(method)
+                .methodDescriptor(descriptor).message(message).attr("exceptionType", exceptionType).build());
+    }
+
+    private static TraceEvent.Builder event(EventType type) {
+        return TraceEvent.builder(type).epochMillis(System.currentTimeMillis()).nanoTime(System.nanoTime())
+                .thread(Thread.currentThread().getName()).threadId(RuntimeThreadIdentity.current());
     }
 
     @Override
@@ -63,9 +84,7 @@ public final class TraceSink implements TraceRuntime.Sink {
                 return; // same pool as last time on this segment — the common case
             }
         }
-        store.appendEvent(segmentId, TraceEvent.builder(EventType.DB_ROUTE)
-                .epochMillis(System.currentTimeMillis()).nanoTime(System.nanoTime())
-                .thread(Thread.currentThread().getName())
+        store.appendEvent(segmentId, event(EventType.DB_ROUTE)
                 .message("route -> " + routeKey)
                 .attr("route", routeKey)
                 .build());
@@ -73,9 +92,7 @@ public final class TraceSink implements TraceRuntime.Sink {
 
     @Override
     public void onExternalCall(String segmentId, String system, String detail) {
-        store.appendEvent(segmentId, TraceEvent.builder(EventType.EXTERNAL_CALL)
-                .epochMillis(System.currentTimeMillis()).nanoTime(System.nanoTime())
-                .thread(Thread.currentThread().getName())
+        store.appendEvent(segmentId, event(EventType.EXTERNAL_CALL)
                 .message(system + "." + detail)
                 .attr("system", system)
                 .attr("detail", detail)
@@ -84,9 +101,7 @@ public final class TraceSink implements TraceRuntime.Sink {
 
     @Override
     public void onBoundary(String segmentId, Map<String, String> attributes) {
-        TraceEvent.Builder event = TraceEvent.builder(EventType.EXTERNAL_CALL)
-                .epochMillis(System.currentTimeMillis()).nanoTime(System.nanoTime())
-                .thread(Thread.currentThread().getName())
+        TraceEvent.Builder event = event(EventType.EXTERNAL_CALL)
                 .message(attributes.get("system") + " " + attributes.get("direction")
                         + " " + attributes.get("destination"));
         attributes.forEach(event::attr);

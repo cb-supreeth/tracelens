@@ -87,6 +87,13 @@ class TraceLensStarterTest {
                 .contains("\"sessionId\" : \"browser-session-1\"")
                 .contains("\"path\" : \"/hello\"")
                 .contains("\"httpStatus\" : \"200\"");
+        String overview = rest.getForObject(url("/tracelens/overview/" + traceId), String.class);
+        assertThat(overview).contains("\"projectionVersion\":1", "\"detailsAvailable\":true", traceId);
+        String page = rest.getForObject(url("/tracelens/events/" + traceId + "?limit=1&maxBytes=4096"), String.class);
+        assertThat(page.getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isLessThanOrEqualTo(4096);
+        assertThat(page).contains("\"through\":", "\"nextAfter\":", traceId);
+        assertThat(rest.getForEntity(url("/tracelens/events/" + traceId + "?maxBytes=1048577"), String.class).getStatusCode().value()).isEqualTo(400);
+        assertThat(rest.getForObject(url("/tracelens/request-data/" + traceId), String.class)).contains("\"attributes\":", traceId);
     }
 
     @Test
@@ -95,6 +102,9 @@ class TraceLensStarterTest {
         assertThat(summary)
                 .contains("\"recordingEnabled\" : true")
                 .contains("\"agentActive\" : false") // no -javaagent in this test JVM
+                .contains("\"httpRetentionPercent\" : 75")
+                .contains("\"policy\" : \"http-reserved\"")
+                .contains("\"httpEventBudget\" : 375000")
                 .contains("\"sinkRegistered\" : true");
     }
 

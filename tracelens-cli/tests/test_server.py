@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tracelens_cli import server
+from tracelens_cli import __version__, server
 
 
 def _trace_with_line():
@@ -93,6 +93,7 @@ def test_render_data_enriches(bridge):
 
 def test_spa_served(bridge):
     with urllib.request.urlopen(f"http://127.0.0.1:{bridge}/", timeout=5) as r:
+        assert r.headers["Server"].split()[0] == f"tracelens-bridge/{__version__}"
         html = r.read().decode()
     assert "TraceLens" in html
     assert "/static/app.js" in html

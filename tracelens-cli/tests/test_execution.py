@@ -6,7 +6,7 @@ import json
 import pytest
 
 from tracelens_cli import execution
-from tracelens_cli.execution import MODEL_MAX_BYTES, MAX_NODES, build_segment_execution
+from tracelens_cli.execution import MODEL_MAX_BYTES, VIEWER_MODEL_MAX_BYTES, MAX_NODES, build_segment_execution
 
 
 CLASS = "com.example.FeatureService"
@@ -427,21 +427,25 @@ def test_node_cap_scans_remaining_events_for_retained_invocation_exits():
     assert_references_resolve(model)
 
 
-def test_hard_byte_cap_handles_long_unicode_strings_and_omits_suffix_explicitly():
+@pytest.mark.parametrize("max_model_bytes", [MODEL_MAX_BYTES, VIEWER_MODEL_MAX_BYTES])
+def test_hard_byte_cap_handles_long_unicode_strings_and_omits_suffix_explicitly(max_model_bytes):
     events = []
     for index in range(MAX_NODES):
         events.extend([
             event(index * 2 + 1, "METHOD_ENTER", "\u2603" * 300 + str(index),
-                  thread="thread-" + str(index), cls="com." + "\u2603" * 300),
+                  thread="thread", cls="com." + "\u2603" * 300),
             event(index * 2 + 2, "METHOD_EXIT", "\u2603" * 300 + str(index),
-                  thread="thread-" + str(index), cls="com." + "\u2603" * 300),
+                  thread="thread", cls="com." + "\u2603" * 300),
         ])
-    model = build_segment_execution(trace(events), max_nodes=MAX_NODES)
-    assert len(encoded(model)) <= MODEL_MAX_BYTES == 32768
+    model = build_segment_execution(trace(events), max_nodes=MAX_NODES, max_model_bytes=max_model_bytes)
+    assert len(encoded(model)) <= max_model_bytes
+    assert model["limits"]["maxModelBytes"] == max_model_bytes
     assert model["counts"]["nodesReturned"] == len(model["nodes"]) < MAX_NODES
     assert model["counts"]["nodesOmitted"] > 0
+    assert model["counts"]["eventsProcessed"] == len(events)
+    assert "model_byte_limit" in warning_text(model)
     assert model["partial"]
-    assert model == build_segment_execution(trace(events), max_nodes=MAX_NODES)
+    assert model == build_segment_execution(trace(events), max_nodes=MAX_NODES, max_model_bytes=max_model_bytes)
     assert_references_resolve(model)
 
 
@@ -467,6 +471,15 @@ def test_entry_with_missing_method_identity_is_explicitly_unmatchable():
 def test_invalid_node_limit_is_rejected_instead_of_silently_coerced(max_nodes):
     with pytest.raises(ValueError, match="max_nodes"):
         build_segment_execution(trace(simple_events()), max_nodes=max_nodes)
+
+
+@pytest.mark.parametrize("max_model_bytes", [
+    None, False, True, 0, -1, MODEL_MAX_BYTES - 1,
+    VIEWER_MODEL_MAX_BYTES + 1, float(MODEL_MAX_BYTES), str(MODEL_MAX_BYTES),
+])
+def test_invalid_model_byte_budget_is_rejected(max_model_bytes):
+    with pytest.raises(ValueError, match="max_model_bytes"):
+        build_segment_execution(trace(simple_events()), max_model_bytes=max_model_bytes)
 
 
 @pytest.mark.parametrize("export", [None, [], "{}", 0])

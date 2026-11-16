@@ -8,7 +8,13 @@ tasks.named('compileJava', JavaCompile) {
     options.release = 8
 }
 
+configurations {
+    tomcatJakartaBodyTest { canBeConsumed = false; transitive = false }
+}
+
 dependencies {
+    // Loaded only by Main-Class in a separate tooling JVM, never from premain.
+    implementation project(':tracelens-tool')
     // Same ByteBuddy cb-ems uses (Java 21 compatible). Shaded + relocated below so the
     // agent never clashes with the app's own ByteBuddy (Hibernate) on the classpath.
     implementation 'net.bytebuddy:byte-buddy:1.15.11'
@@ -23,6 +29,16 @@ dependencies {
 
     testImplementation project(':tracelens-bridge')
     testImplementation 'net.bytebuddy:byte-buddy-agent:1.15.11'
+    // Real-driver weaving regressions only; these drivers are never bundled in the agent.
+    testImplementation 'org.postgresql:postgresql:42.7.5'
+    testImplementation 'com.mysql:mysql-connector-j:8.0.31'
+    // Real Vert.x 3 middleware adapter regression tests; never bundled in the agent.
+    testImplementation 'io.vertx:vertx-core:3.9.16'
+    // Synchronous Apache HTTP client adapter tests; not bundled in the agent.
+    testImplementation 'org.apache.httpcomponents:httpclient:4.5.14'
+    // Real servlet input/form parsing regression; never bundled in the agent.
+    testImplementation 'org.apache.tomcat.embed:tomcat-embed-core:9.0.122'
+    tomcatJakartaBodyTest 'org.apache.tomcat.embed:tomcat-embed-core:10.1.55'
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
     testImplementation 'org.assertj:assertj-core:3.25.3'
     testImplementation 'org.junit.platform:junit-platform-launcher:1.10.2'
@@ -36,6 +52,7 @@ test {
     // must not leak into other test classes' classloader view.
     forkEvery = 1
     dependsOn ':tracelens-bridge:compileJava'
+    doFirst { systemProperty 'tracelens.test.tomcatJakartaJar', configurations.tomcatJakartaBodyTest.singleFile.absolutePath }
 }
 
 def bridgeJarTask = project(':tracelens-bridge').tasks.named('jar', Jar)
@@ -61,6 +78,7 @@ shadowJar {
 
     manifest {
         attributes(
+                'Main-Class': 'com.chargebee.tracelens.tool.ToolMain',
                 'Premain-Class': 'com.chargebee.tracelens.agent.TraceLensAgent',
                 'Agent-Class': 'com.chargebee.tracelens.agent.TraceLensAgent',
                 'Can-Redefine-Classes': 'true',
@@ -88,7 +106,8 @@ build.dependsOn shadowJar
 // Regular unit tests stay on Java 21; this exercises the delivered shaded jar and
 // bootstrap bridge in a real Java 8 VM (including executor retransformation).
 sourceSets {
-    java8Smoke
+    java8Smoke { java.srcDir 'src/jobFixture/java' }
+    test { java.srcDir 'src/jobFixture/java' }
 }
 
 dependencies {
@@ -112,4 +131,71 @@ tasks.register('java8Smoke', JavaExec) {
         jvmArgs "-javaagent:${tasks.shadowJar.archiveFile.get().asFile.absolutePath}",
                 "-Dtracelens.configPath=${file('src/java8Smoke/resources/tracelens-java8.json').absolutePath}"
     }
+}
+
+tasks.register('java8ToolSmoke', JavaExec) {
+    group = 'verification'
+    description = 'Smoke-test the dual-mode JAR CLI and MCP in an installed Java 8 JVM.'
+    dependsOn shadowJar, java8SmokeClasses
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(8)
+    }
+    classpath = sourceSets.java8Smoke.runtimeClasspath
+    mainClass = 'com.chargebee.tracelens.compat.Java8ToolSmoke'
+    doFirst {
+        args tasks.shadowJar.archiveFile.get().asFile.absolutePath
+    }
+}
+
+tasks.register('javaBundle', Zip) {
+    group = 'distribution'
+    description = 'Package the combined JAR, guided setup launcher and portable service configurations.'
+    dependsOn shadowJar
+    archiveFileName = "tracelens-java-${project.version}.zip"
+    destinationDirectory = rootProject.layout.buildDirectory.dir('distributions')
+    from(tasks.shadowJar.archiveFile) { rename { 'tracelens.jar' } }
+    from(rootProject.file('scripts/java-bundle/tracelens.json'))
+    from(rootProject.file('scripts/java-bundle/setup.sh')) { filePermissions { unix('rwxr-xr-x') } }
+    from(rootProject.file('scripts/java-bundle/ems/tracelens.json')) { into 'ems' }
+}
+
+sourceSets { benchmark }
+dependencies { benchmarkImplementation project(':tracelens-core') }
+tasks.named('compileBenchmarkJava', JavaCompile) { options.release = 8 }
+
+def benchmarkTasks = []
+['off', 'overview', 'methods', 'detailed'].each { mode ->
+    def taskName = "benchmark${mode.capitalize()}"
+    benchmarkTasks.add(taskName)
+    tasks.register(taskName, JavaExec) {
+        group = 'verification'
+        description = "Synthetic isolated-JVM ${mode} overhead sample; not a production benchmark."
+        dependsOn shadowJar, benchmarkClasses
+        classpath = sourceSets.benchmark.runtimeClasspath
+        mainClass = 'com.chargebee.tracelens.benchmark.BenchmarkMain'
+        jvmArgs '-Xms256m', '-Xmx512m'
+        args mode, providers.gradleProperty('traceLensBenchmarkIterations').getOrElse('1000')
+        doFirst {
+            def configFile = layout.buildDirectory.file("benchmark/${mode}.json").get().asFile
+            configFile.parentFile.mkdirs()
+            configFile.text = groovy.json.JsonOutput.toJson([
+                applicationId: 'synthetic-benchmark', packages: ['com.example.tracelensbenchmark'],
+                captureMode: mode == 'off' ? 'overview' : mode, trackMethods: true,
+                instrumentExecutors: false, instrumentMessaging: false, captureMessagingBoundaries: false,
+                instrumentScheduled: false, captureDataStoreBoundaries: false,
+                captureJdbcQueries: false, captureClickHouseQueries: false,
+                maxTrackedRequests: 10, maxTrackedEvents: 10000, httpRetentionPercent: 0
+            ])
+            jvmArgs "-Dtracelens.configPath=${configFile.absolutePath}"
+            if (mode != 'off') jvmArgs "-javaagent:${tasks.shadowJar.archiveFile.get().asFile.absolutePath}"
+        }
+    }
+}
+tasks.register('benchmarkModes') {
+    group = 'verification'
+    description = 'Compare no agent, overview, methods and detailed capture in separate local JVMs.'
+    dependsOn benchmarkTasks
+}
+benchmarkTasks.eachWithIndex { name, index ->
+    if (index > 0) tasks.named(name) { mustRunAfter benchmarkTasks[index - 1] }
 }

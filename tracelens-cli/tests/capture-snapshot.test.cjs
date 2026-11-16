@@ -35,6 +35,8 @@ async function harness(discovery, exports, discoveryStatus = 200, settings = {})
   const federated = settings.federated !== false;
   const nodes = new Map();
   const requests = [];
+  const element = () => ({classList: {toggle() {}, add() {}, remove() {}}, childNodes: [],
+    replaceChildren(...children) { this.childNodes = children; }});
   const context = {
     window: { TraceLensRequests: model, TraceLensBrowserStore: browserStore,
       TraceLensRequestUI: class {
@@ -43,10 +45,11 @@ async function harness(discovery, exports, discoveryStatus = 200, settings = {})
       } },
     document: {
       querySelector(selector) {
-        if (!nodes.has(selector)) nodes.set(selector, { classList: { toggle() {}, add() {}, remove() {} } });
+        if (!nodes.has(selector)) nodes.set(selector, element());
         return nodes.get(selector);
       },
       querySelectorAll() { return []; },
+      createElement: element,
     },
     TextEncoder, TextDecoder, URLSearchParams,
     setInterval() { return 0; },
@@ -102,6 +105,30 @@ test("an ordinary federated pin preserves the exact canonical discovery graph", 
   assert.deepEqual(result.journey.visualization, visualization);
   assert.equal(result.segments.length, 2);
   assert.equal(fixture.requests.filter(call => call.path.startsWith("/api/render-data/")).length, 2);
+});
+
+test("scheduler summary fields survive attributes-only export capture and compact saved metadata", async () => {
+  const job = {jobType: "compute_billing_metrics", jobId: "42", jobOutcome: "SKIPPED", jobAuditStatus: "IGNORED",
+    jobFailureType: "com.chargebee.app.scheduler.IgnoreJobSignal", scheduler: "chargebee"};
+  const summary = segment("job-run", "cb-app", {entryChannel: "SCHEDULER", path: "", httpMethod: "",
+    httpStatus: null, lensId: job.jobType, ...job});
+  const exported = {...summary, attributes: {...job, payload: "SECRET_JOB_PAYLOAD"},
+    events: [{type: "EXCEPTION", attributes: {exceptionType: job.jobFailureType}}]};
+  for (const key of Object.keys(job)) delete exported[key];
+  const {events, ...rawSegment} = exported;
+  const visualization = visualizationFor([rawSegment]);
+  Object.assign(visualization.nodes[0], job, {entryChannel: "SCHEDULER"});
+  const fixture = await harness({traceId: TRACE, segments: [rawSegment], links: [], httpCalls: [],
+    errors: [], warnings: [], partial: false, completeness: "observed-only", visualization}, {[summary.segmentId]: exported});
+  const result = await fixture.capture(model.groupTraces([summary])[0]);
+  for (const [key, value] of Object.entries(job)) assert.equal(result.request[key], value);
+  assert.equal(result.request.outcome, "skipped");
+  assert.equal(result.request.hasErrors, false);
+  assert.deepEqual(result.journey.visualization, visualization);
+  assert.deepEqual(result.segments[0].attributes, exported.attributes);
+  const saved = browserStore.preparePin({...result, id: "job-pin", name: "Job run", traceId: TRACE}, 1234);
+  for (const [key, value] of Object.entries(job)) assert.equal(saved.summary.request[key], value);
+  assert.doesNotMatch(JSON.stringify(saved.summary), /SECRET_JOB_PAYLOAD|attributes|EXCEPTION/);
 });
 
 test("single-service application and default discovery aliases retain one saved segment and its graph", async () => {

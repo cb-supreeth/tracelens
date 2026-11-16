@@ -4,6 +4,7 @@ import com.chargebee.tracelens.bridge.AgentStatus;
 import com.chargebee.tracelens.bridge.TraceRuntime;
 import com.chargebee.tracelens.core.config.TraceLensConfig;
 import com.chargebee.tracelens.core.export.TraceExporter;
+import com.chargebee.tracelens.core.export.TraceProjection;
 import com.chargebee.tracelens.core.store.TraceStore;
 import com.chargebee.tracelens.core.store.TraceSummary;
 import com.chargebee.tracelens.core.trace.Trace;
@@ -55,6 +56,8 @@ public final class TraceLensDebugServlet extends HttpServlet {
             writeJson(resp, traces(store.summaries()));
         } else if (path.startsWith("/export/")) {
             export(path.substring("/export/".length()), req, resp);
+        } else if (path.startsWith("/overview/") || path.startsWith("/events/") || path.startsWith("/request-data/")) {
+            projection(path, req, resp);
         } else if (path.startsWith("/find-by-lens-id/")) {
             findByLensId(path.substring("/find-by-lens-id/".length()), resp);
         } else if (path.equals("/metadata")) {
@@ -104,11 +107,18 @@ public final class TraceLensDebugServlet extends HttpServlet {
 
     private ObjectNode summary() {
         ObjectNode node = mapper.createObjectNode();
+        TraceProjection.capabilities(node, config);
         node.put("recordingEnabled", store.isRecordingEnabled());
         node.put("traceCount", store.size());
         node.put("totalEvents", store.totalEvents());
         node.put("maxTrackedEvents", config.getMaxTrackedEvents());
         node.put("maxTrackedRequests", config.getMaxTrackedRequests());
+        node.put("captureJdbcQueries", config.isCaptureJdbcQueries());
+        node.put("captureJdbcParameters", config.isCaptureJdbcQueries() && config.isCaptureJdbcParameters());
+        node.put("maxSqlLength", config.getMaxSqlLength());
+        node.put("maxSqlQueriesPerRequest", config.getMaxSqlQueriesPerRequest());
+        node.put("httpRetentionPercent", config.getHttpRetentionPercent());
+        node.set("retention", mapper.valueToTree(store.retentionSummary()));
         node.put("agentActive", AgentStatus.agentActive());
         node.put("instrumentedClasses", AgentStatus.instrumentedCount());
         node.put("failedClasses", AgentStatus.failedCount());
@@ -151,6 +161,7 @@ public final class TraceLensDebugServlet extends HttpServlet {
 
     private ObjectNode metadata() {
         ObjectNode node = mapper.createObjectNode();
+        TraceProjection.capabilities(node, config);
         node.put("applicationId", config.getApplicationId());
         node.put("applicationVersion", config.getApplicationVersion());
         node.putPOJO("packages", config.getPackages());
@@ -160,6 +171,8 @@ public final class TraceLensDebugServlet extends HttpServlet {
         node.put("trackMethods", config.isTrackMethods());
         node.put("trackExceptions", config.isTrackExceptions());
         node.put("instrumentExecutors", config.isInstrumentExecutors());
+        node.put("instrumentScheduled", config.isInstrumentScheduled());
+        node.putPOJO("chargebeeJobTypes", config.getChargebeeJobTypes());
         node.put("idleTtlMinutes", config.getIdleTtlMinutes());
         node.put("evictOnExport", config.isEvictOnExport());
         node.put("agentActive", AgentStatus.agentActive());
@@ -194,6 +207,26 @@ public final class TraceLensDebugServlet extends HttpServlet {
     private void writeJson(HttpServletResponse resp, ObjectNode node) throws IOException {
         resp.setContentType("application/json");
         resp.getWriter().write(mapper.writeValueAsString(node));
+    }
+
+    private void projection(String path, HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String operation = path.substring(1, path.indexOf('/', 1));
+        Optional<Trace> found = store.get(path.substring(operation.length() + 2));
+        if (!found.isPresent()) { notFound(resp, "no such trace"); return; }
+        try {
+            TraceProjection projection = new TraceProjection(exporter);
+            java.util.Map<String, String> params = TraceProjection.query(req.getQueryString());
+            if (!"events".equals(operation) && !params.isEmpty()) throw new IllegalArgumentException("No query accepted for this projection");
+            ObjectNode result = "overview".equals(operation) ? projection.overview(found.get())
+                    : "events".equals(operation) ? projection.events(found.get(), params) : projection.requestData(found.get());
+            resp.setContentType("application/json");
+            resp.setCharacterEncoding("UTF-8");
+            resp.setHeader("Cache-Control", "no-store");
+            resp.getWriter().write(TraceProjection.serialize(result));
+        } catch (IllegalArgumentException invalid) {
+            resp.setStatus(400);
+            writeJson(resp, mapper.createObjectNode().put("error", invalid.getMessage()));
+        }
     }
 
     private static String pathInfo(HttpServletRequest req) {

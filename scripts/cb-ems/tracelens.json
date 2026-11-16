@@ -1,0 +1,47 @@
+{
+  "applicationId": "cb-ems",
+  "applicationVersion": "LOCAL",
+  "httpIncludePaths": [
+    "/"
+  ],
+  "packages": [
+    "com.chargebee.ems"
+  ],
+  "excludedPackages": [
+    "com.chargebee.ems.api.model"
+  ],
+  "blacklistedNodes": [
+    "ToStringBuilder"
+  ],
+  "capturePayloads": false,
+  "captureHttpQueryParameters": false,
+  "captureHttpRequestBodies": false,
+  "redactHttpPayloads": true,
+  "maxHttpPayloadLength": 4096,
+  "captureClickHouseQueries": false,
+  "captureClickHouseParameters": false,
+  "captureJdbcQueries": true,
+  "captureJdbcParameters": true,
+  "maxSqlLength": 4096,
+  "maxSqlQueriesPerRequest": 100,
+  "maxTrackedEvents": 500000,
+  "maxTrackedRequests": 200,
+  "idleTtlMinutes": 60,
+  "evictOnExport": false,
+  "trackMethods": true,
+  "trackExceptions": true,
+  "requireLabels": false,
+  "distributedTracingEnabled": true,
+  "httpClientCaptureEnabled": true,
+  "httpPropagationAllowedDestinations": [],
+  "contextParams": {
+    "jvmArgs": [
+      "aws.profile.name"
+    ]
+  },
+  "httpRetentionPercent": 75,
+  "instrumentExecutors": true,
+  "instrumentScheduled": true,
+  "instrumentMessaging": true,
+  "captureMessagingBoundaries": true
+}

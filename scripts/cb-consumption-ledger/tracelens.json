@@ -1,0 +1,38 @@
+{
+  "applicationId": "cb-consumption-ledger",
+  "applicationVersion": "LOCAL",
+  "httpIncludePaths": ["/api/v2", "/micro_service"],
+  "packages": [
+    "com.chargebee.app.accounts", "com.chargebee.app.api.ledger",
+    "com.chargebee.app.service", "com.chargebee.app.repository",
+    "com.chargebee.app.integrations", "com.chargebee.app.validation",
+    "com.chargebee.app.adapter", "com.chargebee.app.grant_blocks",
+    "com.chargebee.app.overdraft_billing"
+  ],
+  "blacklistedNodes": ["ToStringBuilder"],
+  "capturePayloads": false,
+  "captureJdbcQueries": true,
+  "captureJdbcParameters": false,
+  "maxSqlLength": 4096,
+  "maxSqlQueriesPerRequest": 100,
+  "maxTrackedEvents": 100000,
+  "maxTrackedRequests": 100,
+  "httpRetentionPercent": 75,
+  "idleTtlMinutes": 30,
+  "evictOnExport": false,
+  "trackMethods": true,
+  "trackExceptions": true,
+  "instrumentExecutors": true,
+  "instrumentMessaging": false,
+  "captureMessagingBoundaries": true,
+  "captureDataStoreBoundaries": true,
+  "instrumentScheduled": false,
+  "chargebeeJobTypes": [],
+  "requireLabels": false,
+  "distributedTracingEnabled": true,
+  "httpClientCaptureEnabled": true,
+  "httpPropagationAllowedDestinations": [
+    "127.0.0.1:8080", "localhost:8080", "localcb.in:8080",
+    "mannar-test.localcb.in:8080"
+  ]
+}

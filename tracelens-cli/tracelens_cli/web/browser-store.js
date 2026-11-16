@@ -74,6 +74,7 @@
     const fields = ["key", "label", "method", "site", "channel", "outcome", "hasErrors", "rootMissing", "rootAmbiguous",
       "segmentId", "segmentKey", "traceId", "lensId", "user", "entryChannel", "status",
       "httpMethod", "path", "httpStatus", "startedAtMillis", "lastActivityMillis", "durationMs", "eventCount",
+      "jobType", "jobId", "jobOutcome", "jobAuditStatus", "jobFailureType", "scheduler",
       "approxSizeBytes", "service", "applicationId", "applicationVersion", "serviceInstanceId", "spanId", "parentSpanId"];
     const summary = {};
     for (const field of fields) {

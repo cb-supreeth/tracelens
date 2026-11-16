@@ -1,5 +1,6 @@
 package com.chargebee.tracelens.core.event;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -18,25 +19,41 @@ public final class TraceEvent {
     /** Absolute System.nanoTime() at capture; the owning trace derives relative offsets. */
     private final long nanoTime;
     private final String thread;
+    private final Long threadId;
     private final EventType type;
     private final String className;
     private final String methodName;
+    private final String methodDescriptor;
     private final int line;
     private final String message;
     private final Map<String, String> attributes;
+    private final boolean fieldsTruncated;
+    private final boolean detailGapBefore;
 
     private TraceEvent(Builder b) {
         this.seq = b.seq;
         this.epochMillis = b.epochMillis;
         this.nanoTime = b.nanoTime;
-        this.thread = b.thread;
+        this.thread = bound(b.thread, 512);
+        this.threadId = b.threadId;
         this.type = b.type;
-        this.className = b.className;
-        this.methodName = b.methodName;
+        this.className = bound(b.className, 1024);
+        this.methodName = bound(b.methodName, 256);
+        this.methodDescriptor = bound(b.methodDescriptor, 2048);
         this.line = b.line;
-        this.message = b.message;
+        this.message = bound(b.message, 4096);
         this.attributes = b.attributes == null ? null : Collections.unmodifiableMap(b.attributes);
+        this.fieldsTruncated = b.fieldsTruncated || longer(b.thread, 512) || longer(b.className, 1024)
+                || longer(b.methodName, 256) || longer(b.methodDescriptor, 2048) || longer(b.message, 4096);
+        this.detailGapBefore = b.detailGapBefore;
     }
+
+    private static String bound(String value, int limit) {
+        return value == null || value.length() <= limit ? value : value.substring(0, limit);
+    }
+    private static boolean longer(String value, int limit) { return value != null && value.length() > limit; }
+    public boolean isFieldsTruncated() { return fieldsTruncated; }
+    public boolean isDetailGapBefore() { return detailGapBefore; }
 
     public long getSeq() {
         return seq;
@@ -54,6 +71,9 @@ public final class TraceEvent {
         return thread;
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Long getThreadId() { return threadId; }
+
     public EventType getType() {
         return type;
     }
@@ -65,6 +85,9 @@ public final class TraceEvent {
     public String getMethodName() {
         return methodName;
     }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getMethodDescriptor() { return methodDescriptor; }
 
     public int getLine() {
         return line;
@@ -113,11 +136,15 @@ public final class TraceEvent {
         private long epochMillis;
         private long nanoTime;
         private String thread;
+        private Long threadId;
         private String className;
         private String methodName;
+        private String methodDescriptor;
         private int line = -1;
         private String message;
         private Map<String, String> attributes;
+        private boolean fieldsTruncated;
+        private boolean detailGapBefore;
 
         private Builder(EventType type) {
             this.type = type;
@@ -143,6 +170,11 @@ public final class TraceEvent {
             return this;
         }
 
+        public Builder threadId(Long threadId) {
+            this.threadId = threadId;
+            return this;
+        }
+
         public Builder className(String className) {
             this.className = className;
             return this;
@@ -150,6 +182,11 @@ public final class TraceEvent {
 
         public Builder methodName(String methodName) {
             this.methodName = methodName;
+            return this;
+        }
+
+        public Builder methodDescriptor(String methodDescriptor) {
+            this.methodDescriptor = methodDescriptor;
             return this;
         }
 
@@ -164,14 +201,21 @@ public final class TraceEvent {
         }
 
         public Builder attr(String key, String value) {
-            if (value != null) {
+            if (key != null && key.length() <= 128 && value != null) {
                 if (attributes == null) {
                     attributes = new LinkedHashMap<>();
                 }
-                attributes.put(key, value);
+                if (attributes.size() < 32 || attributes.containsKey(key)) {
+                    attributes.put(key, bound(value, 16384));
+                    fieldsTruncated |= value.length() > 16384;
+                } else fieldsTruncated = true;
+            } else if (value != null) {
+                fieldsTruncated = true;
             }
             return this;
         }
+        public Builder fieldsTruncated(boolean value) { fieldsTruncated |= value; return this; }
+        public Builder detailGapBefore(boolean value) { detailGapBefore |= value; return this; }
 
         public TraceEvent build() {
             return new TraceEvent(this);

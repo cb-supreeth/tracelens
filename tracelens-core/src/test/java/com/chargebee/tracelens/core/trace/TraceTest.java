@@ -4,6 +4,9 @@ import com.chargebee.tracelens.core.event.EventType;
 import com.chargebee.tracelens.core.event.TraceEvent;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TraceTest {
@@ -87,5 +90,179 @@ class TraceTest {
         trace.setUser("supreeth_12345");
 
         assertThat(trace.getUser()).isEqualTo("supreeth_12345");
+    }
+
+    private Map<String, String> httpCall(String spanId, String status) {
+        Map<String, String> call = new LinkedHashMap<>();
+        call.put("spanId", spanId);
+        call.put("status", status);
+        call.put("httpMethod", "POST");
+        call.put("peer", "service.local");
+        call.put("path", "/features/search");
+        return call;
+    }
+
+    private TraceEvent currentThreadLine(int line) {
+        return TraceEvent.line(0, 2_000L, 100L, Thread.currentThread().getName(),
+                "com.example.FeatureClient", line);
+    }
+
+    @Test
+    void capturesLatestSameThreadAnchorAtHttpStartWithoutAddingAnEvent() {
+        Trace trace = newTrace(10);
+        trace.addEvent(currentThreadLine(10));
+        trace.addEvent(currentThreadLine(11));
+        trace.addEvent(TraceEvent.line(0, 2_001L, 101L, "other-thread", "Other", 99));
+
+        trace.recordHttpCall(httpCall("http-1", "ACTIVE"));
+
+        assertThat(trace.httpCalls().get(0))
+                .containsEntry("callingContextStatus", "recorded")
+                .containsEntry("callingEventSeq", "2")
+                .containsEntry("callingThread", Thread.currentThread().getName());
+        assertThat(trace.eventCount()).isEqualTo(3);
+    }
+
+    @Test
+    void preservesHttpStartAnchorWhenCompletionArrivesOnAnotherThread() throws InterruptedException {
+        Trace trace = newTrace(10);
+        trace.addEvent(currentThreadLine(10));
+        trace.recordHttpCall(httpCall("http-1", "ACTIVE"));
+        String callingThread = Thread.currentThread().getName();
+
+        Thread completion = new Thread(() -> {
+            trace.addEvent(currentThreadLine(90));
+            Map<String, String> completed = httpCall("http-1", "COMPLETED");
+            completed.put("httpStatus", "200");
+            trace.recordHttpCall(completed);
+        }, "http-completion");
+        completion.start();
+        completion.join();
+
+        assertThat(trace.httpCalls()).hasSize(1);
+        assertThat(trace.httpCalls().get(0))
+                .containsEntry("status", "COMPLETED")
+                .containsEntry("httpStatus", "200")
+                .containsEntry("callingContextStatus", "recorded")
+                .containsEntry("callingEventSeq", "1")
+                .containsEntry("callingThread", callingThread);
+    }
+
+    @Test
+    void ignoresSuppliedCallingContextAtStartAndCompletion() {
+        Trace trace = newTrace(10);
+        trace.addEvent(currentThreadLine(10));
+        Map<String, String> call = httpCall("http-1", "ACTIVE");
+        call.put("callingContextStatus", "spoofed");
+        call.put("callingEventSeq", "999");
+        call.put("callingThread", "wrong-thread");
+        trace.recordHttpCall(call);
+        trace.addEvent(currentThreadLine(11));
+        call.put("status", "ERROR");
+        trace.recordHttpCall(call);
+
+        assertThat(trace.httpCalls().get(0))
+                .containsEntry("status", "ERROR")
+                .containsEntry("callingContextStatus", "recorded")
+                .containsEntry("callingEventSeq", "1")
+                .containsEntry("callingThread", Thread.currentThread().getName());
+    }
+
+    @Test
+    void completionOnlyCannotInventAnHttpStartAnchorEvenIfActiveArrivesLater() {
+        Trace trace = newTrace(10);
+        trace.addEvent(currentThreadLine(10));
+        trace.recordHttpCall(httpCall("http-1", "COMPLETED"));
+        trace.recordHttpCall(httpCall("http-1", "ACTIVE"));
+
+        assertThat(trace.httpCalls().get(0))
+                .containsEntry("callingContextStatus", "start-not-observed")
+                .doesNotContainKeys("callingEventSeq", "callingThread");
+    }
+
+    @Test
+    void doesNotUseAnotherThreadsTimelineForAnHttpCall() {
+        Trace trace = newTrace(10);
+        trace.addEvent(TraceEvent.line(0, 2_000L, 100L, "another-thread", "Other", 9));
+        trace.addEvent(TraceEvent.line(0, 2_001L, 101L, null, "UnknownThread", 10));
+        trace.recordHttpCall(httpCall("http-1", "ACTIVE"));
+        // Later events cannot backfill evidence that was absent at call start.
+        trace.addEvent(currentThreadLine(11));
+        trace.recordHttpCall(httpCall("http-1", "COMPLETED"));
+
+        assertThat(trace.httpCalls().get(0))
+                .containsEntry("callingContextStatus", "source-not-observed")
+                .doesNotContainKeys("callingEventSeq", "callingThread");
+    }
+
+    @Test
+    void recordsUnavailableContextWhenNoTimelineWasCaptured() {
+        Trace trace = newTrace(10);
+        trace.recordHttpCall(httpCall("http-1", "ACTIVE"));
+
+        assertThat(trace.httpCalls().get(0))
+                .containsEntry("callingContextStatus", "source-not-observed")
+                .doesNotContainKeys("callingEventSeq", "callingThread");
+        assertThat(trace.eventCount()).isZero();
+    }
+
+    @Test
+    void refusesAnAnchorAfterAnyKnownTimelineDropButKeepsEarlierAnchors() {
+        Trace trace = newTrace(1);
+        trace.addEvent(currentThreadLine(10));
+        // Filling the cap itself is not a gap: this first call still has evidence.
+        trace.recordHttpCall(httpCall("before-drop", "ACTIVE"));
+        assertThat(trace.addEvent(currentThreadLine(11))).isFalse();
+        trace.recordHttpCall(httpCall("after-drop", "ACTIVE"));
+        trace.recordHttpCall(httpCall("before-drop", "COMPLETED"));
+
+        assertThat(trace.httpCalls().get(0))
+                .containsEntry("callingContextStatus", "recorded")
+                .containsEntry("callingEventSeq", "1");
+        assertThat(trace.httpCalls().get(1))
+                .containsEntry("callingContextStatus", "source-not-observed")
+                .doesNotContainKeys("callingEventSeq", "callingThread");
+        assertThat(trace.eventCount()).isEqualTo(1);
+    }
+
+    @Test
+    void unknownOrOversizedThreadIdentityIsNotTruncatedIntoAnAnchor() {
+        Trace trace = newTrace(10);
+        Thread thread = Thread.currentThread();
+        String original = thread.getName();
+        try {
+            thread.setName(String.join("", java.util.Collections.nCopies(513, "t")));
+            trace.addEvent(currentThreadLine(10));
+            trace.recordHttpCall(httpCall("long-thread", "ACTIVE"));
+            thread.setName("");
+            trace.addEvent(currentThreadLine(11));
+            trace.recordHttpCall(httpCall("unnamed-thread", "ACTIVE"));
+        } finally {
+            thread.setName(original);
+        }
+
+        assertThat(trace.httpCalls()).allSatisfy(call -> assertThat(call)
+                .containsEntry("callingContextStatus", "source-not-observed")
+                .doesNotContainKeys("callingEventSeq", "callingThread"));
+    }
+
+    @Test
+    void callerMetadataRemainsWithinExistingPerCallAndPerTraceBounds() {
+        Trace trace = newTrace(10);
+        trace.addEvent(currentThreadLine(10));
+        for (int i = 0; i < 65; i++) {
+            Map<String, String> call = httpCall("http-" + i, "ACTIVE");
+            for (int field = 0; field < 30; field++) call.put("extra-" + field, "value");
+            trace.recordHttpCall(call);
+        }
+
+        assertThat(trace.httpCalls()).hasSize(64).allSatisfy(call -> {
+            assertThat(call).hasSize(24)
+                    .containsEntry("callingContextStatus", "recorded")
+                    .containsEntry("callingEventSeq", "1");
+            assertThat(call.values()).allSatisfy(value -> assertThat(value.length()).isLessThanOrEqualTo(512));
+        });
+        assertThat(trace.isHttpCallsTruncated()).isTrue();
+        assertThat(trace.eventCount()).isEqualTo(1);
     }
 }

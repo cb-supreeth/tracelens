@@ -34,8 +34,9 @@ public final class TraceContext {
     /** Activate a snapshot; returns a scope that restores the previous one on close. */
     public static TraceScope activate(TraceSnapshot snapshot) {
         TraceSnapshot previous = CURRENT.get();
+        TraceScope scope = new TraceScope(previous);
         CURRENT.set(snapshot);
-        return new TraceScope(previous);
+        return scope;
     }
 
     static void restore(TraceSnapshot previous) {
@@ -52,13 +53,13 @@ public final class TraceContext {
 
     /**
      * Capture the current snapshot into a task for executor hops. Used by the
-     * starter's TaskDecorators and the agent's Executor advice alike — this is how a
-     * trace survives thread pools without OTel's executor instrumentation.
+     * starter's explicit TaskDecorators. Automatic executor advice associates
+     * context without replacing the application's task identity.
      * Already-wrapped tasks (TracedTask) and no-trace tasks pass through untouched.
      */
     public static Runnable wrap(Runnable task) {
         TraceSnapshot snapshot = CURRENT.get();
-        if (snapshot == null || task instanceof TracedTask) {
+        if (task == null || snapshot == null || task instanceof TracedTask) {
             return task;
         }
         TraceRuntime.noteWrappedTask();
@@ -75,7 +76,7 @@ public final class TraceContext {
 
     public static <T> java.util.concurrent.Callable<T> wrap(java.util.concurrent.Callable<T> task) {
         TraceSnapshot snapshot = CURRENT.get();
-        if (snapshot == null || task instanceof TracedTask) {
+        if (task == null || snapshot == null || task instanceof TracedTask) {
             return task;
         }
         TraceRuntime.noteWrappedTask();

@@ -51,9 +51,20 @@ public final class TraceLifecycle implements TraceRuntime.LifecycleListener {
 
     @Override
     public void end(String segmentId) {
+        end(segmentId, null);
+    }
+
+    @Override
+    public void end(String segmentId, Map<String, String> attributes) {
+        if (segmentId == null) return;
         Tracer.ActiveTrace trace = active.remove(segmentId);
         if (trace != null) {
-            trace.close();
+            try {
+                if (attributes != null) attributes.forEach(trace.trace()::putAttribute);
+            } finally {
+                // Outcome metadata must never prevent completion/context restoration.
+                trace.close();
+            }
         }
     }
 

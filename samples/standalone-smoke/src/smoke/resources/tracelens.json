@@ -1,6 +1,7 @@
 {
   "applicationId": "standalone-smoke",
   "applicationVersion": "LOCAL",
+  "httpIncludePaths": ["/api"],
   "packages": ["com.example.standalone"],
   "evictOnExport": true,
   "capturePayloads": false,

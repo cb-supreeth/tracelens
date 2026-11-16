@@ -16,18 +16,21 @@ public final class SqsProducerAdvice {
 
     @Advice.OnMethodEnter(suppress = Throwable.class)
     public static Object enter(@Advice.Argument(0) Object sendMessageRequest,
-                               @Advice.Origin("#m") String method) {
+                               @Advice.Origin("#m") String method,
+                               @Advice.Local("propagation") Object propagation) {
         boolean batch = "sendMessageBatch".equals(method);
         // Preserve the existing single-message propagation behavior. Batch
         // observation does not add new header/attribute propagation.
         if (!batch && MessagingBoundaryRuntime.isPropagationEnabled()) {
-            TraceRuntime.injectMessageAttributes(sendMessageRequest);
+            propagation = TraceRuntime.beginMessageAttributes(sendMessageRequest);
         }
         return MessagingBoundaryRuntime.enterSqs(sendMessageRequest, batch);
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
-    public static void exit(@Advice.Enter Object token, @Advice.Thrown Throwable failure) {
-        MessagingBoundaryRuntime.exitPublish(token, failure);
+    public static void exit(@Advice.Enter Object token, @Advice.Thrown Throwable failure,
+                            @Advice.Local("propagation") Object propagation) {
+        try { MessagingBoundaryRuntime.exitPublish(token, failure); }
+        finally { TraceRuntime.endMessageAttributes(propagation); }
     }
 }

@@ -30,6 +30,16 @@ class ApplicationIdDefaultTest {
                 .isEqualTo("custom-service");
     }
 
+    @Test
+    void retentionReservationDefaultsAndPropertyOverrideReachCoreConfig() {
+        assertThat(configuration.traceLensConfig(properties(), new MockEnvironment()).getHttpRetentionPercent())
+                .isEqualTo(75);
+        assertThat(configuration.traceLensConfig(properties().setHttpRetentionPercent(60), new MockEnvironment())
+                .getHttpRetentionPercent()).isEqualTo(60);
+        assertThat(configuration.traceLensConfig(properties().setHttpRetentionPercent(0), new MockEnvironment())
+                .getHttpRetentionPercent()).isZero();
+    }
+
     private TraceLensProperties properties() {
         return new TraceLensProperties().setPackages(List.of("com.example.app"));
     }

@@ -3,11 +3,15 @@ package com.chargebee.tracelens.agent;
 import com.chargebee.tracelens.bridge.AgentStatus;
 import com.chargebee.tracelens.bridge.HttpTraceRuntime;
 import com.chargebee.tracelens.bridge.HttpClientTraceRuntime;
+import com.chargebee.tracelens.bridge.ApacheHttpClientTraceRuntime;
+import com.chargebee.tracelens.bridge.VertxHttpTraceRuntime;
 import com.chargebee.tracelens.bridge.W3CTraceContext;
 import com.chargebee.tracelens.bridge.TraceRuntime;
 import com.chargebee.tracelens.bridge.TraceSnapshot;
 import com.chargebee.tracelens.core.config.TraceLensConfig;
+import com.chargebee.tracelens.core.config.TraceLensConfigLoader;
 import com.chargebee.tracelens.core.export.TraceExporter;
+import com.chargebee.tracelens.core.export.TraceProjection;
 import com.chargebee.tracelens.core.record.TraceLifecycle;
 import com.chargebee.tracelens.core.record.TraceSink;
 import com.chargebee.tracelens.core.record.Tracer;
@@ -28,6 +32,7 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -49,6 +54,7 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
     private static StandaloneRuntime instance;
 
     private final TraceLensConfig config;
+    private final List<String> httpIncludePaths;
     private final TraceStore store;
     private final TraceExporter exporter;
     private final TraceRuntime.Sink sink;
@@ -61,6 +67,7 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
 
     private StandaloneRuntime(TraceLensConfig config) {
         this.config = config;
+        this.httpIncludePaths = Collections.unmodifiableList(new ArrayList<>(config.getHttpIncludePaths()));
         this.store = new TraceStore(config);
         this.exporter = new TraceExporter(config, true);
         this.sink = new TraceSink(store);
@@ -72,13 +79,12 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
         if (instance != null) return true;
         StandaloneRuntime starting = null;
         try {
+            TraceLensConfigLoader.rejectLegacyHttpIncludePaths();
             // Standalone mode deliberately permits an empty instrumentation scope:
             // HTTP metadata still works, without instrumenting arbitrary libraries.
-            if (config == null || blank(config.getApplicationId()) || blank(config.getApplicationVersion())
-                    || config.getMaxTrackedRequests() < 1 || config.getMaxTrackedEvents() < 1000
-                    || config.getIdleTtlMinutes() < 1 || !config.validateDistributedTracing().isEmpty()) {
-                throw new IllegalArgumentException("invalid TraceLens configuration");
-            }
+            if (config == null) throw new IllegalArgumentException("invalid TraceLens configuration");
+            List<String> errors = config.validate(true);
+            if (!errors.isEmpty()) throw new IllegalArgumentException("invalid TraceLens configuration: " + String.join("; ", errors));
             int requestedPort = Integer.parseInt(System.getProperty("tracelens.port", "7778"));
             if (requestedPort < 0 || requestedPort > 65535) {
                 throw new IllegalArgumentException("tracelens.port must be between 0 and 65535");
@@ -86,14 +92,21 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
             starting = new StandaloneRuntime(config);
             starting.openServer(requestedPort);
             synchronized (TraceRuntime.class) {
-                if (TraceRuntime.hasSink() || HttpTraceRuntime.hasListener()) {
+                if (TraceRuntime.hasSink() || HttpTraceRuntime.hasListener() || VertxHttpTraceRuntime.hasListener()) {
                     throw new IllegalStateException("another TraceLens runtime is already installed");
                 }
                 TraceRuntime.registerSink(starting.sink);
                 TraceRuntime.registerLifecycleListener(starting.lifecycle);
                 HttpTraceRuntime.registerListener(starting);
+                VertxHttpTraceRuntime.registerListener(starting);
                 HttpClientTraceRuntime.registerListener(starting);
                 HttpClientTraceRuntime.configure(config.isHttpClientCaptureEnabled(), config.isDistributedTracingEnabled(), config.getHttpPropagationAllowedDestinations());
+                ApacheHttpClientTraceRuntime.registerListener(starting);
+                ApacheHttpClientTraceRuntime.configure(config.isHttpClientCaptureEnabled(), config.isDistributedTracingEnabled(), config.getHttpPropagationAllowedDestinations());
+                com.chargebee.tracelens.bridge.JdbcQueryRuntime.configure(config.isCaptureJdbcQueries(),
+                        config.getMaxSqlLength(), config.getMaxSqlQueriesPerRequest(), config.isCaptureJdbcParameters());
+                com.chargebee.tracelens.bridge.ClickHouseQueryRuntime.configure(config.isCaptureClickHouseQueries(),
+                        config.getMaxSqlLength(), config.getMaxSqlQueriesPerRequest(), config.isCaptureClickHouseParameters());
             }
             starting.store.startSweeper();
             starting.shutdownHook = new Thread(StandaloneRuntime::stop, "tracelens-shutdown");
@@ -117,7 +130,11 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
     public static synchronized void stop() {
         StandaloneRuntime running = instance;
         instance = null;
-        if (running != null) running.close();
+        if (running != null) {
+            running.close();
+            com.chargebee.tracelens.bridge.JdbcQueryRuntime.configure(false, 4096, 100);
+            com.chargebee.tracelens.bridge.ClickHouseQueryRuntime.configure(false, 4096, 100, false);
+        }
     }
 
     private void openServer(int requestedPort) throws Exception {
@@ -158,7 +175,9 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
     private void close() {
         // A later adapter must not be unregistered when only this runtime closes.
         quietly(() -> HttpTraceRuntime.unregisterListener(this));
+        quietly(() -> VertxHttpTraceRuntime.unregisterListener(this));
         quietly(() -> HttpClientTraceRuntime.unregisterListener(this));
+        quietly(() -> ApacheHttpClientTraceRuntime.unregisterListener(this));
         quietly(() -> TraceRuntime.unregisterLifecycleListener(lifecycle));
         quietly(() -> TraceRuntime.unregisterSink(sink));
         quietly(store::close);
@@ -175,6 +194,18 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
 
     @Override
     public boolean distributedTracingEnabled() { return config.isDistributedTracingEnabled(); }
+
+    @Override
+    public List<String> httpIncludePaths() { return httpIncludePaths; }
+
+    @Override public boolean captureHttpQueryParameters() { return config.isCaptureHttpQueryParameters(); }
+    @Override public boolean captureHttpRequestBodies() { return config.isCaptureHttpRequestBodies(); }
+    @Override public boolean captureHttpDetails(String segmentId) { return store.get(segmentId).isPresent(); }
+    @Override public int maxHttpPayloadLength() { return config.getMaxHttpPayloadLength(); }
+    @Override public Map<String, String> sanitizeHttpPayload(String input, String format, boolean query) {
+        return com.chargebee.tracelens.core.http.HttpPayloadSanitizer.sanitize(
+                input, format, query, config.getMaxHttpPayloadLength(), config.isRedactHttpPayloads());
+    }
 
     @Override
     public void record(String segmentId, Map<String, String> call) {
@@ -205,6 +236,7 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
         boolean retained = capture && !attrs.containsKey("captureSkipped") && store.register(trace);
         // Even skipped/disabled recording must carry context through an instrumented hop.
         if (!retained && !config.isDistributedTracingEnabled()) return null;
+        if (!retained && !attrs.containsKey("captureSkipped")) attrs.put("captureSkipped", "not-retained");
         // The bridge owns context activation and servlet async completion.
         return new TraceSnapshot(trace.getTraceId(), trace.getSegmentId(), label, user, attrs);
     }
@@ -268,6 +300,8 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
                 json(exchange, 200, traces(store.summaries()));
             } else if (path.startsWith("/export/")) {
                 export(exchange, path.substring("/export/".length()));
+            } else if (path.startsWith("/overview/") || path.startsWith("/events/") || path.startsWith("/request-data/")) {
+                projection(exchange, path);
             } else if (path.startsWith("/find-by-lens-id/")) {
                 List<TraceSummary> matches = new ArrayList<>();
                 for (Trace trace : store.findByLensId(path.substring("/find-by-lens-id/".length()))) {
@@ -324,6 +358,7 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
 
     private static String allowedMethods(String path) {
         if (path.equals("/summary") || path.equals("/traces") || path.startsWith("/export/")
+                || path.startsWith("/overview/") || path.startsWith("/events/") || path.startsWith("/request-data/")
                 || path.startsWith("/find-by-lens-id/") || path.startsWith("/find-by-trace-id/") || path.equals("/metadata")
                 || path.equals("/instrumented-classes")) return "GET";
         if (path.equals("/enable") || path.equals("/disable")) return "POST";
@@ -333,6 +368,7 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
 
     private ObjectNode summary() {
         ObjectNode node = mapper.createObjectNode();
+        TraceProjection.capabilities(node, config);
         node.put("mode", "standalone");
         node.put("javaVersion", System.getProperty("java.version"));
         node.put("port", server.getAddress().getPort());
@@ -343,14 +379,22 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
         node.put("httpRedirectGuardReady", HttpClientTraceRuntime.isRedirectGuardReady());
         node.put("httpClientCaptureEnabled", config.isHttpClientCaptureEnabled());
         node.put("captureMessagingBoundaries", config.isCaptureMessagingBoundaries());
+        node.put("captureDataStoreBoundaries", config.isCaptureDataStoreBoundaries());
+        node.put("captureJdbcQueries", config.isCaptureJdbcQueries());
+        node.put("captureJdbcParameters", config.isCaptureJdbcQueries() && config.isCaptureJdbcParameters());
+        requestEvidenceSettings(node);
+        node.put("maxSqlLength", config.getMaxSqlLength());
+        node.put("maxSqlQueriesPerRequest", config.getMaxSqlQueriesPerRequest());
         node.put("instrumentMessaging", config.isInstrumentMessaging());
-        node.put("lineCaptureEnabled", !config.getPackages().isEmpty());
+        node.putPOJO("httpIncludePaths", httpIncludePaths);
         node.putPOJO("packages", config.getPackages());
         node.put("recordingEnabled", store.isRecordingEnabled());
         node.put("traceCount", store.size());
         node.put("totalEvents", store.totalEvents());
         node.put("maxTrackedEvents", config.getMaxTrackedEvents());
         node.put("maxTrackedRequests", config.getMaxTrackedRequests());
+        node.put("httpRetentionPercent", config.getHttpRetentionPercent());
+        node.set("retention", mapper.valueToTree(store.retentionSummary()));
         node.put("agentActive", AgentStatus.agentActive());
         node.put("instrumentedClasses", AgentStatus.instrumentedCount());
         node.put("failedClasses", AgentStatus.failedCount());
@@ -359,7 +403,10 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
         ObjectNode bridge = node.putObject("bridge");
         bridge.put("sinkRegistered", TraceRuntime.hasSink());
         bridge.put("httpListenerRegistered", HttpTraceRuntime.hasListener());
-        bridge.put("capturedRequests", HttpTraceRuntime.capturedRequests());
+        bridge.put("capturedRequests", HttpTraceRuntime.capturedRequests() + VertxHttpTraceRuntime.capturedRequests());
+        bridge.put("vertxHttpListenerRegistered", VertxHttpTraceRuntime.hasListener());
+        bridge.put("vertxCapturedRequests", VertxHttpTraceRuntime.capturedRequests());
+        bridge.put("vertxInFlightRequests", VertxHttpTraceRuntime.inFlightRequests());
         bridge.put("emitted", TraceRuntime.emittedCount());
         bridge.put("droppedNoSink", TraceRuntime.droppedNoSinkCount());
         bridge.put("droppedNoTrace", TraceRuntime.droppedNoTraceCount());
@@ -412,10 +459,11 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
 
     private ObjectNode metadata() {
         ObjectNode node = mapper.createObjectNode();
+        TraceProjection.capabilities(node, config);
         node.put("mode", "standalone");
         node.put("applicationId", config.getApplicationId());
         node.put("applicationVersion", config.getApplicationVersion());
-        node.put("lineCaptureEnabled", !config.getPackages().isEmpty());
+        node.putPOJO("httpIncludePaths", httpIncludePaths);
         node.putPOJO("packages", config.getPackages());
         node.putPOJO("modules", config.getModules());
         node.putPOJO("excludedPackages", config.getExcludedPackages());
@@ -424,6 +472,8 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
         node.put("trackMethods", config.isTrackMethods());
         node.put("trackExceptions", config.isTrackExceptions());
         node.put("instrumentExecutors", config.isInstrumentExecutors());
+        node.put("instrumentScheduled", config.isInstrumentScheduled());
+        node.putPOJO("chargebeeJobTypes", config.getChargebeeJobTypes());
         node.put("idleTtlMinutes", config.getIdleTtlMinutes());
         node.put("evictOnExport", config.isEvictOnExport());
         node.put("requireLabels", config.isRequireLabels());
@@ -433,10 +483,26 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
         node.putPOJO("httpPropagationAllowedDestinations", config.getHttpPropagationAllowedDestinations());
         node.put("httpClientCaptureEnabled", config.isHttpClientCaptureEnabled());
         node.put("captureMessagingBoundaries", config.isCaptureMessagingBoundaries());
+        node.put("captureDataStoreBoundaries", config.isCaptureDataStoreBoundaries());
+        node.put("captureJdbcQueries", config.isCaptureJdbcQueries());
+        node.put("captureJdbcParameters", config.isCaptureJdbcQueries() && config.isCaptureJdbcParameters());
+        requestEvidenceSettings(node);
+        node.put("maxSqlLength", config.getMaxSqlLength());
+        node.put("maxSqlQueriesPerRequest", config.getMaxSqlQueriesPerRequest());
         node.put("instrumentMessaging", config.isInstrumentMessaging());
         node.put("httpRedirectGuardReady", HttpClientTraceRuntime.isRedirectGuardReady());
         node.put("agentActive", AgentStatus.agentActive());
         return node;
+    }
+
+    private void requestEvidenceSettings(ObjectNode node) {
+        node.put("captureHttpQueryParameters", config.isCaptureHttpQueryParameters());
+        node.put("captureHttpRequestBodies", config.isCaptureHttpRequestBodies());
+        node.put("redactHttpPayloads", config.isRedactHttpPayloads());
+        node.put("maxHttpPayloadLength", config.getMaxHttpPayloadLength());
+        node.put("httpRequestBodyCaptureSupport", "tomcat-application-reads-json-form");
+        node.put("captureClickHouseQueries", config.isCaptureClickHouseQueries());
+        node.put("captureClickHouseParameters", config.isCaptureClickHouseQueries() && config.isCaptureClickHouseParameters());
     }
 
     private ObjectNode instrumentedClasses() {
@@ -465,6 +531,21 @@ public final class StandaloneRuntime implements HttpTraceRuntime.Listener, HttpC
 
     private void json(HttpExchange exchange, int code, ObjectNode node) throws IOException {
         respond(exchange, code, mapper.writeValueAsString(node));
+    }
+
+    private void projection(HttpExchange exchange, String path) throws IOException {
+        String operation = path.substring(1, path.indexOf('/', 1));
+        Optional<Trace> found = store.get(path.substring(operation.length() + 2));
+        if (!found.isPresent()) { error(exchange, 404, "no such trace"); return; }
+        try {
+            TraceProjection projection = new TraceProjection(exporter);
+            Map<String, String> params = TraceProjection.query(exchange.getRequestURI().getRawQuery());
+            if (!"events".equals(operation) && !params.isEmpty()) throw new IllegalArgumentException("No query accepted for this projection");
+            ObjectNode result = "overview".equals(operation) ? projection.overview(found.get())
+                    : "events".equals(operation) ? projection.events(found.get(), params) : projection.requestData(found.get());
+            result.put("serviceInstanceId", serviceInstanceId);
+            respond(exchange, 200, TraceProjection.serialize(result));
+        } catch (IllegalArgumentException invalid) { error(exchange, 400, invalid.getMessage()); }
     }
 
     private static void respond(HttpExchange exchange, int code, String body) throws IOException {

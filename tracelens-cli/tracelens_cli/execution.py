@@ -1,4 +1,4 @@
-"""On-demand, bounded execution evidence for MCP clients; stdlib only, no I/O.
+"""On-demand, bounded execution evidence for MCP and the viewer; stdlib only, no I/O.
 
 This is an observed invocation forest, not a complete/direct call graph. Events
 carry thread *names* and class/method names, not stable thread or invocation IDs.
@@ -22,6 +22,7 @@ MAX_DEPTH = 512
 MAX_TEXT = 256
 MAX_KEY = 4096
 MODEL_MAX_BYTES = 32 * 1024
+VIEWER_MODEL_MAX_BYTES = 128 * 1024
 LIMITATIONS = [
     "Observed instrumented nesting only, not proof of a direct caller or a complete call graph; absence is not non-execution.",
     "Lanes use thread names, not unique thread IDs. Reused/renamed names and missing events can make nesting ambiguous. No async causality is inferred.",
@@ -53,14 +54,19 @@ def _json_size(value):
     return len(json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode("ascii"))
 
 
-def build_segment_execution(trace: dict, max_nodes: int = DEFAULT_MAX_NODES) -> dict:
+def build_segment_execution(trace: dict, max_nodes: int = DEFAULT_MAX_NODES, *,
+                            max_model_bytes: int = MODEL_MAX_BYTES) -> dict:
     """Reconstruct a deterministic prefix from one export, without mutating it.
 
     Matching scans only bounded per-name stacks. Output stores at most max_nodes
     nodes; unreturned frames still consume exit evidence so display limits cannot
     attach children to the wrong visible parent. Byte limiting removes a suffix.
+    The viewer can select a larger bounded budget; default/MCP callers retain
+    their original 32 KiB limit. This does not change reconstruction/input limits.
     """
     validate_max_nodes(max_nodes)
+    if type(max_model_bytes) is not int or not MODEL_MAX_BYTES <= max_model_bytes <= VIEWER_MODEL_MAX_BYTES:
+        raise ValueError(f"max_model_bytes must be an integer between {MODEL_MAX_BYTES} and {VIEWER_MODEL_MAX_BYTES}")
     if not isinstance(trace, dict):
         raise ValueError("segment export must be an object")
     warnings = Counter()
@@ -96,7 +102,7 @@ def build_segment_execution(trace: dict, max_nodes: int = DEFAULT_MAX_NODES) -> 
         "lanes": [], "nodes": [], "counts": {}, "warnings": [],
         "limitations": list(LIMITATIONS), "partial": False,
         "limits": {"maxNodes": max_nodes, "maxEvents": MAX_EVENTS, "maxLanes": MAX_LANES,
-                   "maxDepth": MAX_DEPTH, "maxModelBytes": MODEL_MAX_BYTES},
+                   "maxDepth": MAX_DEPTH, "maxModelBytes": max_model_bytes},
     }
     nodes = model["nodes"]
     lanes = {}  # exact, unclipped thread-name keys; None never maintains a stack
@@ -155,7 +161,7 @@ def build_segment_execution(trace: dict, max_nodes: int = DEFAULT_MAX_NODES) -> 
             # secrets before applying this model's existing display/byte limits.
             # Evidence and lane identity already live on the enclosing marker.
             node["boundary"] = {
-                key: text(value) if isinstance(value, str) else value
+                key: text(value) if isinstance(value, str) and key != "sql" else value
                 for key, value in boundary.items() if key not in ("thread", "eventSeq")
             }
         append_node(node)
@@ -306,7 +312,7 @@ def build_segment_execution(trace: dict, max_nodes: int = DEFAULT_MAX_NODES) -> 
         model["partial"] = bool(model["warnings"])
 
     finish()
-    if _json_size(model) > MODEL_MAX_BYTES:
+    if _json_size(model) > max_model_bytes:
         warnings["model_byte_limit"] += 1
         # Prefix pruning preserves every visible parent reference. Lane metadata
         # is also pruned to referenced lanes only when the byte cap is reached.
@@ -327,7 +333,7 @@ def build_segment_execution(trace: dict, max_nodes: int = DEFAULT_MAX_NODES) -> 
             nodes[:] = full_nodes[:middle]
             trim_lanes()
             finish()
-            if _json_size(model) <= MODEL_MAX_BYTES:
+            if _json_size(model) <= max_model_bytes:
                 low = middle
             else:
                 high = middle - 1

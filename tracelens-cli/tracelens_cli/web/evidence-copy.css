@@ -1,0 +1,10 @@
+.evidence-heading, .request-data-field-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 12px; }
+.evidence-heading > h4, .request-data-field-header > h4 { flex:1; }
+.evidence-copy { display:inline-flex; align-items:center; flex-wrap:wrap; gap:6px; font:12px/1.4 var(--sans, sans-serif); }
+.evidence-copy-button { padding:3px 8px; margin:0; min-height:26px; border:1px solid var(--border, #303943); border-radius:5px; color:var(--fg, #dce4ec); background:var(--panel, #161b22); font:inherit; cursor:pointer; }
+.evidence-copy-button:hover:not(:disabled) { border-color:var(--accent, #58a6ff); }
+.evidence-copy-button:focus-visible { outline:2px solid var(--accent, #58a6ff); outline-offset:2px; }
+.evidence-copy-button:disabled { cursor:wait; opacity:.65; }
+.evidence-copy-status:not(.evidence-copy-error) { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.evidence-copy-error { color:var(--amber, #e3b341); max-width:28em; }
+.evidence-actions { display:flex; justify-content:flex-end; margin:6px 0; }

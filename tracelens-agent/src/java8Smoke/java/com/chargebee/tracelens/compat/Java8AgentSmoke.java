@@ -1,7 +1,11 @@
 package com.chargebee.tracelens.compat;
 
 import com.chargebee.cbappfixture.LegacyService;
+import com.chargebee.app.models.SchJob;
+import com.chargebee.app.scheduler.internal.AppJobExecutor;
 import com.chargebee.tracelens.bridge.AgentStatus;
+import com.chargebee.tracelens.bridge.JdbcQueryRuntime;
+import com.chargebee.tracelens.bridge.ClickHouseQueryRuntime;
 import com.chargebee.tracelens.bridge.TraceContext;
 import com.chargebee.tracelens.bridge.TraceRuntime;
 import com.chargebee.tracelens.core.config.TraceLensConfig;
@@ -27,7 +31,10 @@ public final class Java8AgentSmoke {
         require("1.8".equals(System.getProperty("java.specification.version")), "must run on Java 8");
         require(AgentStatus.agentActive(), "shaded agent premain did not run");
         require(TraceRuntime.class.getClassLoader() == null, "bridge must come from bootstrap");
+        require(JdbcQueryRuntime.class.getClassLoader() == null, "JDBC runtime must share the bootstrap bridge");
+        require(ClickHouseQueryRuntime.class.getClassLoader() == null, "native ClickHouse runtime must share the bootstrap bridge");
         TraceLensConfig config = new TraceLensConfigLoader().load();
+        require(config.isCaptureJdbcQueries(), "JDBC opt-in not loaded");
         ExecutorService executor = Executors.newSingleThreadExecutor();
         try (TraceStore store = new TraceStore(config)) {
             TraceRecording.install(store);
@@ -36,6 +43,15 @@ public final class Java8AgentSmoke {
             try (Tracer.ActiveTrace active = tracer.begin("legacy-request", "developer", EntryChannel.HTTP,
                     Collections.singletonMap("httpMethod", "GET")).get()) {
                 recorded = active.trace();
+                // Exercise the packaged Java 8 bridge/store path without requiring a database here.
+                // Real driver executions are covered separately by JdbcDatabaseIntegrationTest.
+                Object jdbc = JdbcQueryRuntime.enter(new Object(), "org.postgresql.jdbc.PgStatement",
+                        "executeQuery", "SELECT 'local-smoke-literal'");
+                JdbcQueryRuntime.exit(jdbc, null);
+                ClickHouseQueryRuntime.configure(true, 4096, 100, true);
+                Object nativeQuery = ClickHouseQueryRuntime.enter("SELECT {probe:UInt8}", Collections.singletonMap("probe", 1));
+                ClickHouseQueryRuntime.exit(nativeQuery, java.util.concurrent.CompletableFuture.completedFuture(null), null);
+                ClickHouseQueryRuntime.configure(false, 4096, 100, false);
                 require(LegacyService.calculate() == 12, "woven code changed the result");
                 require(executor.submit(() -> {
                     require(TraceContext.current() != null, "executor lost trace context");
@@ -54,6 +70,13 @@ public final class Java8AgentSmoke {
                     "worker context leaked into unrelated work");
             require(recorded.events().stream().anyMatch(event -> event.getType() == EventType.LINE),
                     "no line events");
+            require(recorded.events().stream().anyMatch(event -> event.getType() == EventType.EXTERNAL_CALL
+                    && "SELECT 'local-smoke-literal'".equals(event.getAttributes().get("sql"))),
+                    "packaged JDBC runtime did not retain SQL in the trace store");
+            require(recorded.events().stream().anyMatch(event -> "clickhouse-query".equals(event.getAttributes().get("evidenceKind"))
+                    && "SELECT {probe:UInt8}".equals(event.getAttributes().get("sql"))
+                    && event.getAttributes().get("sqlParameters").contains("probe")),
+                    "packaged native ClickHouse runtime did not retain SQL and named bindings");
             require(recorded.events().stream().anyMatch(event -> event.getType() == EventType.EXCEPTION),
                     "no exception events");
             require(recorded.events().stream().anyMatch(event -> event.getMethodName() != null
@@ -67,11 +90,30 @@ public final class Java8AgentSmoke {
             String continued = lifecycle.begin("upstream-trace", "legacy-message", "developer", "SQS", null);
             require(continued != null, "null-attribute continuation rejected");
             lifecycle.end(continued);
+            TraceRuntime.registerLifecycleListener(lifecycle);
+            AppJobExecutor jobs = new AppJobExecutor();
+            jobs.exec(new SchJob("compute_billing_metrics", "success"), null);
+            Trace jobTrace = store.get(jobs.observedSegment).get();
+            require(jobTrace.getEntryChannel() == EntryChannel.SCHEDULER, "custom job channel missing");
+            require("SUCCEEDED".equals(jobTrace.getAttributes().get("jobOutcome")), "job audit not observed");
+            require(jobTrace.events().stream().anyMatch(event -> event.getType() == EventType.METHOD_ENTER
+                    && "execute".equals(event.getMethodName())), "custom job method was not woven");
+            jobs.exec(new SchJob("compute_billing_metrics", "ignored"), null);
+            require("SKIPPED".equals(store.get(jobs.observedSegment).get().getAttributes().get("jobOutcome")),
+                    "ignored custom job incorrectly classified");
+            jobs.exec(new SchJob("compute_billing_metrics", "failed"), null);
+            require("FAILED".equals(store.get(jobs.observedSegment).get().getAttributes().get("jobOutcome")),
+                    "swallowed custom job failure not captured");
+            jobs.exec(new SchJob("other_job", "success"), null);
+            require(jobs.observedSegment == null, "unselected custom job was captured");
+            require(TraceContext.current() == null, "custom job context leaked");
             require(AgentStatus.failedCount() == 0, "some classes failed instrumentation");
-            require(TraceRuntime.wrappedTaskCount() > 0, "executor instrumentation did not wrap tasks");
+            require(com.chargebee.tracelens.bridge.ExecutorTraceRuntime.propagatedTaskCount() > 0,
+                    "executor instrumentation did not propagate task context");
             System.out.println("JAVA8_SMOKE_OK events=" + recorded.eventCount()
                     + " instrumented=" + AgentStatus.instrumentedCount());
         } finally {
+            TraceRuntime.unregisterLifecycleListener();
             TraceRecording.uninstall();
             executor.shutdownNow();
         }

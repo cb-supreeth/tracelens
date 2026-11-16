@@ -1,8 +1,10 @@
 {
   "applicationId": "cb-app-java8-smoke",
   "applicationVersion": "LOCAL",
-  "packages": ["com.chargebee.cbappfixture"],
+  "packages": ["com.chargebee.cbappfixture", "com.chargebee.app.billing_metrics"],
+  "chargebeeJobTypes": ["compute_billing_metrics"],
   "evictOnExport": false,
+  "captureJdbcQueries": true,
   "instrumentExecutors": true,
   "instrumentMessaging": false,
   "instrumentScheduled": false

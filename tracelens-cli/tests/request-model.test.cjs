@@ -221,3 +221,41 @@ test("pathless scheduler buckets preserve distinct job labels and repeat counts"
   assert.equal(buckets.find((bucket) => bucket.label.includes("expire-licenses")).requests.length, 1);
   assert.equal(model.bucketRequests(requests, false).length, 3);
 });
+
+test("scheduler outcomes require explicit execution evidence, never lifecycle or exception events", () => {
+  const job = extra => row({entryChannel: "SCHEDULER", httpStatus: null, httpMethod: "", path: "", lensId: "",
+    jobType: "compute_billing_metrics", jobId: "123", scheduler: "chargebee", ...extra});
+  for (const [jobOutcome, outcome] of [["SUCCEEDED", "success"], ["SKIPPED", "skipped"], ["FAILED", "error"],
+    ["RUNNING", "active"], ["UNKNOWN", "unknown"], [null, "unknown"]]) {
+    const request = model.groupTraces([job({jobOutcome, exceptionCount: 1,
+      events: [{type: "EXCEPTION", attributes: {exceptionType: "com.chargebee.jobs.IgnoreJobSignal"}}]})])[0];
+    assert.equal(request.outcome, outcome);
+    assert.equal(request.hasErrors, outcome === "error");
+    assert.equal(request.hasExceptions, true);
+    assert.equal(request.label, "compute_billing_metrics");
+    assert.equal(request.jobId, "123");
+    assert.equal(model.filterRequests([request], {channel: "SCHEDULER", outcome, query: "123"}, NOW).length, 1);
+  }
+  assert.equal(model.groupTraces([job({httpStatus: 200})])[0].outcome, "unknown");
+  assert.equal(model.groupTraces([job({jobOutcome: "SKIPPED"}), child({httpStatus: 500})])[0].outcome, "error");
+  for (const jobOutcome of ["SUCCEEDED", "SKIPPED"]) {
+    assert.equal(model.groupTraces([job({jobOutcome, parentSpanId: "unobserved"})])[0].outcome, "unknown");
+  }
+  for (const jobOutcome of ["SUCCEEDED", "SKIPPED", "FAILED", "RUNNING", "UNKNOWN"]) {
+    assert.equal(model.groupTraces([row({jobOutcome})])[0].outcome, "success");
+    assert.equal(model.groupTraces([row({httpStatus: null, attributes: {jobOutcome}})])[0].outcome, "unknown");
+  }
+});
+
+test("job metadata normalizes raw attributes without mutating or interpreting audit status", () => {
+  const attrs = {jobType: "compute_billing_metrics", jobId: 42, scheduler: "chargebee", jobOutcome: "skipped",
+    jobAuditStatus: "rescheduled", jobFailureType: null, secretPayload: "excluded from summary"};
+  const request = model.groupTraces([row({entryChannel: "SCHEDULER", httpStatus: null, attributes: attrs})])[0];
+  assert.equal(request.outcome, "skipped");
+  assert.equal(request.jobOutcome, "SKIPPED");
+  assert.equal(request.jobAuditStatus, "RESCHEDULED");
+  assert.equal(request.jobId, "42");
+  assert.equal(request.jobFailureType, null);
+  assert.equal(attrs.jobOutcome, "skipped");
+  assert.equal(model.filterRequests([request], {channel: "SCHEDULER", query: "compute_billing_metrics"}, NOW).length, 1);
+});

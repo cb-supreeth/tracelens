@@ -143,6 +143,27 @@ def test_outcome_filters_use_whole_request_including_downstream():
     assert investigate_request(discovery, path="features", outcome="success")["status"] == "not_found"
 
 
+@pytest.mark.parametrize("job_outcome,outcome", [("SUCCEEDED", "success"), ("SKIPPED", "skipped"),
+    ("FAILED", "error"), ("RUNNING", "active"), ("UNKNOWN", "unknown"), (None, "unknown")])
+def test_scheduler_outcomes_match_request_ui_and_do_not_promote_caught_exceptions(job_outcome, outcome):
+    row = segment(entryChannel="SCHEDULER", httpStatus=None, path="", httpMethod="", jobOutcome=job_outcome,
+                  jobType="compute_billing_metrics", jobId="42", scheduler="chargebee", exceptionCount=1)
+    result = investigate_request(Discovery([row]), label="upgrade", outcome=outcome)
+    assert result["status"] == "selected"
+    assert result["investigation"]["request"]["outcome"] == outcome
+    assert result["investigation"]["hasObservedFailure"] is (outcome == "error")
+
+
+@pytest.mark.parametrize("outcome", ["SUCCEEDED", "SKIPPED", "FAILED", "RUNNING", "UNKNOWN"])
+def test_job_outcome_does_not_reclassify_http_evidence(outcome):
+    for http_status, expected in ((200, "success"), (None, "unknown")):
+        row = segment(httpStatus=http_status, attributes={"jobOutcome": outcome})
+        result = investigate_request(Discovery([row]), label="upgrade", outcome=expected)
+        assert result["status"] == "selected"
+        assert result["investigation"]["request"]["outcome"] == expected
+        assert not result["investigation"]["hasObservedFailure"]
+
+
 def test_missing_root_is_unknown_not_success_and_exception_is_not_automatically_failure():
     result = investigate_request(Discovery([segment(parentSpanId="missing", hasExceptions=True)]),
                                  path="features", outcome="unknown")

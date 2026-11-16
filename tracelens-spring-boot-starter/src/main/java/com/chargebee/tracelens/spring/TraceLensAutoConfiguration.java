@@ -55,12 +55,25 @@ public class TraceLensAutoConfiguration {
                 .setBlacklistedNodes(props.getBlacklistedNodes())
                 .setCapturePayloads(props.isCapturePayloads())
                 .setMaxTrackedEvents(props.getMaxTrackedEvents())
+                .setMaxTrackedBytes(props.getMaxTrackedBytes())
+                .setMaxSegmentBytes(props.getMaxSegmentBytes())
+                .setCaptureMode(props.getCaptureMode())
+                .setDetailedCapturePaths(props.getDetailedCapturePaths())
+                .setDetailedCaptureUntilEpochMillis(props.getDetailedCaptureUntilEpochMillis())
                 .setMaxTrackedRequests(props.getMaxTrackedRequests())
+                .setHttpRetentionPercent(props.getHttpRetentionPercent())
                 .setIdleTtlMinutes(props.getIdleTtlMinutes())
                 .setEvictOnExport(props.isEvictOnExport())
                 .setTrackMethods(props.isTrackMethods())
                 .setTrackExceptions(props.isTrackExceptions())
                 .setInstrumentExecutors(props.isInstrumentExecutors())
+                .setCaptureDataStoreBoundaries(props.isCaptureDataStoreBoundaries())
+                .setCaptureJdbcQueries(props.isCaptureJdbcQueries())
+                .setCaptureJdbcParameters(props.isCaptureJdbcParameters())
+                .setCaptureClickHouseQueries(props.isCaptureClickHouseQueries())
+                .setCaptureClickHouseParameters(props.isCaptureClickHouseParameters())
+                .setMaxSqlLength(props.getMaxSqlLength())
+                .setMaxSqlQueriesPerRequest(props.getMaxSqlQueriesPerRequest())
                 .setRequireLabels(props.isRequireLabels());
         List<String> errors = config.validate();
         if (!errors.isEmpty()) {
@@ -114,8 +127,8 @@ public class TraceLensAutoConfiguration {
 
     /** Installs the core sink + lifecycle listener into the bridge; starts the sweeper. */
     @Bean
-    TraceLensLifecycle traceLensLifecycle(TraceStore store, Tracer tracer) {
-        return new TraceLensLifecycle(store, tracer);
+    TraceLensLifecycle traceLensLifecycle(TraceStore store, Tracer tracer, TraceLensConfig config) {
+        return new TraceLensLifecycle(store, tracer, config);
     }
 
     static final class TraceLensLifecycle implements org.springframework.context.SmartLifecycle,
@@ -123,15 +136,22 @@ public class TraceLensAutoConfiguration {
 
         private final TraceStore store;
         private final Tracer tracer;
+        private final TraceLensConfig config;
         private volatile boolean running;
 
-        TraceLensLifecycle(TraceStore store, Tracer tracer) {
+        TraceLensLifecycle(TraceStore store, Tracer tracer, TraceLensConfig config) {
             this.store = store;
             this.tracer = tracer;
+            this.config = config;
         }
 
         @Override
         public void start() {
+            com.chargebee.tracelens.bridge.DataStoreBoundaryRuntime.configure(config.isCaptureDataStoreBoundaries());
+            com.chargebee.tracelens.bridge.JdbcQueryRuntime.configure(config.isCaptureJdbcQueries(),
+                    config.getMaxSqlLength(), config.getMaxSqlQueriesPerRequest(), config.isCaptureJdbcParameters());
+            com.chargebee.tracelens.bridge.ClickHouseQueryRuntime.configure(config.isCaptureClickHouseQueries(),
+                    config.getMaxSqlLength(), config.getMaxSqlQueriesPerRequest(), config.isCaptureClickHouseParameters());
             TraceRecording.install(store);
             // agent-driven entry points (queueman consumer, @Scheduled jobs)
             com.chargebee.tracelens.bridge.TraceRuntime.registerLifecycleListener(

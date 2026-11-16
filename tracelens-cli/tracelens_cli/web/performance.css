@@ -1,0 +1,76 @@
+.performance-insights { max-width: 1280px; margin: 4px auto 32px; }
+#results-heading.hidden, #workflow-tools.hidden { display: none; }
+.performance-insights [hidden] { display: none !important; }
+.performance-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin: 16px 0 22px; }
+.performance-heading h2 { margin: 0 0 6px; font-size: 24px; }
+.performance-heading p { margin: 0; }
+.performance-muted { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.performance-readonly { flex-shrink: 0; border: 1px solid var(--border); border-radius: 20px; padding: 4px 10px; color: var(--dim); font-size: 12px; }
+.performance-controls { display: grid; grid-template-columns: minmax(220px, 1.3fr) minmax(180px, 1fr) minmax(160px, .7fr); gap: 12px; }
+.performance-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--dim); font-size: 12px; }
+.performance-field input, .performance-field select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 8px 10px; color: var(--fg); font: 13px/1.4 var(--mono); }
+.performance-field input:disabled, .performance-field select:disabled { opacity: .5; }
+.performance-field input[aria-invalid=true] { border-color: var(--red); }
+.performance-insights :is(button, input, select, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.performance-thresholds { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 12px; padding: 14px 16px 16px; margin: 20px 0 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.performance-thresholds legend { padding: 0 6px; color: var(--dim); font-size: 12px; }
+.performance-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.performance-analyze { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 650; padding: 8px 22px; }
+.performance-cancel { padding: 8px 16px; }
+.performance-source-note { margin: 12px 0 6px; }
+.performance-status { margin: 6px 0 18px; color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.performance-error { color: var(--red); }
+.performance-empty { padding: 28px; border: 1px dashed var(--border); border-radius: 8px; color: var(--dim); }
+.performance-empty h3 { margin: 0 0 8px; font-size: 16px; color: var(--fg); }
+.performance-empty p { margin: 8px 0 0; max-width: 860px; font-size: 13px; }
+.performance-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.performance-metric { display: flex; flex-direction: column; padding: 14px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.performance-metric strong { font-size: 25px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.performance-metric span { color: var(--dim); font-size: 12px; }
+.performance-provenance { margin: 14px 0; color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+.performance-provenance p { margin: 4px 0; }
+.performance-warnings { padding: 10px 14px; margin: 14px 0; border: 1px solid var(--border); border-left: 3px solid var(--amber); border-radius: 6px; font-size: 12px; color: var(--amber); overflow-wrap: anywhere; }
+.performance-warnings summary { cursor: pointer; font-weight: 600; }
+.performance-warnings ul { margin: 8px 0 0; padding-left: 20px; }
+.performance-warnings li + li { margin-top: 5px; }
+.performance-qualification { font-size: 12px; line-height: 1.6; color: var(--dim); overflow-wrap: anywhere; }
+.performance-result-head { display: flex; align-items: center; gap: 16px; margin: 22px 0 12px; }
+.performance-result-head h3 { margin: 0; font-size: 16px; }
+.performance-result-head .performance-field { margin-left: auto; flex-direction: row; align-items: center; gap: 8px; }
+.performance-result-head .performance-field select { width: auto; max-width: 280px; }
+.performance-findings { display: grid; gap: 12px; padding: 0; margin: 0; list-style: none; }
+.performance-finding { min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 16px 18px; }
+.performance-finding-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.performance-finding h4 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.performance-confidence { flex-shrink: 0; font-size: 11px; color: var(--accent); border: 1px solid var(--border); border-radius: 12px; padding: 3px 8px; }
+.performance-heuristic { color: var(--amber); }
+.performance-api { margin: 10px 0 4px; font: 12px/1.6 var(--mono); overflow-wrap: anywhere; }
+.performance-finding > .performance-muted { margin: 4px 0 12px; }
+.performance-pattern { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin: 12px 0; font: 12px/1.7 var(--mono); max-height: 180px; overflow-y: auto; }
+.performance-finding-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 16px; margin: 14px 0; }
+.performance-finding-metrics dt { color: var(--dim); font-size: 11px; grid-row: 1; }
+.performance-finding-metrics dd { margin: 0; font-size: 15px; font-variant-numeric: tabular-nums; grid-row: 2; }
+.performance-explanation { font-size: 13px; margin: 10px 0; overflow-wrap: anywhere; }
+.performance-finding-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 8px; }
+.performance-finding-actions button { font-size: 12px; }
+.performance-finding-actions .performance-field { flex: 1 1 260px; max-width: 460px; }
+.performance-finding-actions > .performance-muted { flex-basis: 100%; }
+@media (max-width: 800px) {
+  .performance-controls { grid-template-columns: 1fr 1fr; }
+  .performance-controls > :first-child { grid-column: 1 / -1; }
+  .performance-thresholds { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
+  .performance-result-head { flex-wrap: wrap; }
+  .performance-result-head > .performance-muted { flex-basis: 100%; }
+  .performance-heading { flex-wrap: wrap; }
+}
+@media (max-width: 480px) {
+  .performance-controls { grid-template-columns: 1fr; }
+  .performance-summary { grid-template-columns: repeat(2, 1fr); }
+  .performance-finding { padding: 14px; }
+  .performance-finding-head { flex-direction: column; gap: 8px; }
+  .performance-finding-metrics { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; }
+  .performance-finding-metrics dt, .performance-finding-metrics dd { grid-row: auto; }
+  .performance-result-head .performance-field { width: 100%; margin-left: 0; }
+  .performance-result-head .performance-field select { flex: 1; max-width: none; }
+  .performance-empty { padding: 20px; }
+}

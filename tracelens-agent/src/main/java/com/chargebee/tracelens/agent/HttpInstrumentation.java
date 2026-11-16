@@ -15,6 +15,16 @@ import static net.bytebuddy.matcher.ElementMatchers.*;
 public final class HttpInstrumentation {
     private HttpInstrumentation() { }
 
+    static ElementMatcher.Junction<TypeDescription> ignoredTypes() {
+        return nameStartsWith("com.chargebee.tracelens.")
+                .or(nameStartsWith("net.bytebuddy."))
+                // Log4j core scans optional plugins whose absent Disruptor, mail,
+                // Jackson XML or OSGi parents are not servlet capture failures.
+                // Exclude before hasSuperType resolves that hierarchy. Deliberately
+                // retain org.apache.logging.log4j.web (its real servlet filter).
+                .or(nameStartsWith("org.apache.logging.log4j.core."));
+    }
+
     public static void install(Instrumentation instrumentation) {
         ElementMatcher.Junction<TypeDescription> filters = hasSuperType(named("javax.servlet.Filter"))
                 .or(hasSuperType(named("jakarta.servlet.Filter")));
@@ -42,8 +52,7 @@ public final class HttpInstrumentation {
                 .disableClassFormatChanges()
                 .with(AgentBuilder.TypeStrategy.Default.REDEFINE)
                 .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
-                .ignore(nameStartsWith("com.chargebee.tracelens.")
-                        .or(nameStartsWith("net.bytebuddy.")))
+                .ignore(ignoredTypes())
                 .type(filters.or(servlets).or(asyncContexts).and(not(isInterface())))
                 .transform((builder, type, loader, module, domain) -> builder.visit(
                         Advice.to(HttpRequestAdvice.class).on(filterMethod.or(serviceMethod)

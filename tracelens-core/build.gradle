@@ -30,6 +30,9 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    // The portable download is exercised directly by PortableEmsConfigTest.
+    inputs.file(rootProject.file('scripts/java-bundle/ems/tracelens.json'))
+            .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 publishing {

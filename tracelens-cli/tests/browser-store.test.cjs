@@ -48,6 +48,16 @@ test("logical request display fields survive summaries without root or segment e
   assert.deepEqual(store.requestSummary({ method: "GET" }).services, []);
 });
 
+test("scheduler snapshot summaries retain approved job metadata, not raw attributes", () => {
+  const job = {channel: "SCHEDULER", outcome: "skipped", hasErrors: false,
+    jobType: "compute_billing_metrics", jobId: "42", jobOutcome: "SKIPPED", jobAuditStatus: "IGNORED",
+    jobFailureType: null, scheduler: "chargebee"};
+  const request = {...job, attributes: {secret: "not summary data"}, root: {events: [{type: "EXCEPTION"}]}};
+  const prepared = store.preparePin(sample({request}), 1234);
+  assert.deepEqual(prepared.summary.request, {...job, services: []});
+  assert.equal(prepared.snapshot.request.attributes.secret, "not summary data");
+});
+
 test("malformed or circular snapshots and filters never silently lose data", () => {
   const cycle = {}; cycle.self = cycle;
   assert.throws(() => store.preparePin(sample({ journey: cycle })), { code: "INVALID_DATA" });

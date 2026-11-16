@@ -33,8 +33,17 @@ public final class TraceSummary {
     private final String filterException;
     private final String asyncTimeout;
     private final String serviceInstanceId;
+    private final String jobType;
+    private final String jobId;
+    private final String jobOutcome;
+    private final String jobAuditStatus;
+    private final String jobFailureType;
+    private final String scheduler;
     private final int httpCallCount;
     private final boolean httpCallsTruncated;
+    private final String captureMode;
+    private final long estimatedRetainedBytes;
+    private final java.util.Map<String, Long> dropReasons;
 
     public TraceSummary(Trace trace) {
         this.traceId = trace.getTraceId();
@@ -65,8 +74,17 @@ public final class TraceSummary {
         this.filterException = trace.getAttributes().get("filterException");
         this.asyncTimeout = trace.getAttributes().get("asyncTimeout");
         this.serviceInstanceId = trace.getAttributes().get("serviceInstanceId");
+        this.jobType = trace.getAttributes().get("jobType");
+        this.jobId = trace.getAttributes().get("jobId");
+        this.jobOutcome = trace.getAttributes().get("jobOutcome");
+        this.jobAuditStatus = trace.getAttributes().get("jobAuditStatus");
+        this.jobFailureType = trace.getAttributes().get("jobFailureType");
+        this.scheduler = trace.getAttributes().get("scheduler");
         this.httpCallCount = trace.httpCalls().size();
         this.httpCallsTruncated = trace.isHttpCallsTruncated();
+        this.captureMode = trace.captureMode();
+        this.estimatedRetainedBytes = trace.retainedBytes();
+        this.dropReasons = trace.dropReasons();
     }
 
     public String getTraceId() {
@@ -141,6 +159,16 @@ public final class TraceSummary {
     public String getFilterException() { return filterException; }
     public String getAsyncTimeout() { return asyncTimeout; }
     public String getServiceInstanceId() { return serviceInstanceId; }
+    public String getJobType() { return jobType; }
+    public String getJobId() { return jobId; }
+    /** Business outcome; independent of the segment's ACTIVE/COMPLETED lifecycle status. */
+    public String getJobOutcome() { return jobOutcome; }
+    public String getJobAuditStatus() { return jobAuditStatus; }
+    public String getJobFailureType() { return jobFailureType; }
+    public String getScheduler() { return scheduler; }
     public int getHttpCallCount() { return httpCallCount; }
     public boolean isHttpCallsTruncated() { return httpCallsTruncated; }
+    public String getCaptureMode() { return captureMode; }
+    public long getEstimatedRetainedBytes() { return estimatedRetainedBytes; }
+    public java.util.Map<String, Long> getDropReasons() { return dropReasons; }
 }

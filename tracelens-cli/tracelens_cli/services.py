@@ -125,10 +125,17 @@ class Federation:
         if not 1 <= limit <= 10000:
             raise ValueError("limit must be between 1 and 10000")
         traces, errors = [], []
+        upstream_partial, upstream_limited = False, False
         for item, doc, error in self._read(lambda s, c: c.traces(), service):
             if error:
                 errors.append(error)
             else:
+                # A finite merged list is not necessarily a complete upstream
+                # observation. Preserve uncertainty before filtering so watchers
+                # cannot infer uniqueness from a service's partial result.
+                # Do not forward arbitrary upstream error bodies into the UI.
+                upstream_partial |= bool(doc.get("partial") or doc.get("errors"))
+                upstream_limited |= bool(doc.get("limited"))
                 traces.extend(_tag(item, row) for row in doc.get("traces", []))
         cutoff = None if since_minutes is None else time.time() * 1000 - since_minutes * 60000
         rows = [t for t in traces
@@ -138,7 +145,8 @@ class Federation:
                 and (cutoff is None or t.get("startedAtMillis", t.get("startedAt", 0)) >= cutoff)]
         rows.sort(key=lambda t: t.get("lastActivityMillis", t.get("startedAtMillis", 0)), reverse=True)
         return {"traces": rows[:limit], "count": min(len(rows), limit), "errors": errors,
-                "partial": bool(errors), "limited": len(rows) > limit, "federated": True}
+                "partial": bool(errors) or upstream_partial,
+                "limited": upstream_limited or len(rows) > limit, "federated": True}
 
     def summary(self) -> dict:
         rows, errors = [], []

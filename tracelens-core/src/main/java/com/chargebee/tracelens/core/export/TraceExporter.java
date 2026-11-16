@@ -16,6 +16,7 @@ public final class TraceExporter {
 
     private final ObjectMapper mapper;
     private final TraceLensConfig config;
+    private final String configurationFingerprint;
 
     public TraceExporter(TraceLensConfig config) {
         this(config, false);
@@ -23,6 +24,7 @@ public final class TraceExporter {
 
     public TraceExporter(TraceLensConfig config, boolean pretty) {
         this.config = config;
+        this.configurationFingerprint = CaptureProvenance.fingerprint(config);
         this.mapper = new ObjectMapper()
                 .setSerializationInclusion(JsonInclude.Include.NON_NULL);
         if (pretty) {
@@ -38,7 +40,7 @@ public final class TraceExporter {
         }
     }
 
-    public ObjectNode toJson(Trace trace) {
+    public ObjectNode metadata(Trace trace) {
         ObjectNode root = mapper.createObjectNode();
         root.put("traceId", trace.getTraceId());
         root.put("segmentId", trace.getSegmentId());
@@ -52,6 +54,7 @@ public final class TraceExporter {
         root.put("entryChannel", trace.getEntryChannel().name());
         root.put("applicationId", config.getApplicationId());
         root.put("applicationVersion", config.getApplicationVersion());
+        root.set("recordingManifest", CaptureProvenance.manifest(config, configurationFingerprint));
         root.put("status", trace.getStatus().name());
         root.put("startedAt", trace.getStartedAtMillis());
         root.put("startNanos", trace.getStartNanos());
@@ -61,12 +64,22 @@ public final class TraceExporter {
         }
         root.put("eventCount", trace.eventCount());
         root.put("truncated", trace.isTruncated());
+        root.put("captureMode", trace.captureMode());
+        root.put("detailTruncated", trace.isTruncated());
+        root.put("estimatedRetainedBytes", trace.retainedBytes());
+        root.set("dropReasons", mapper.valueToTree(trace.dropReasons()));
+        root.put("omittedDetailCallbacks", trace.omittedDetailCallbacks());
+        root.put("dropReasonCountSemantics", "admission failures or capture-mode changes; omitted detail callback count is separate");
         root.put("httpCallsTruncated", trace.isHttpCallsTruncated());
         root.set("httpCalls", mapper.valueToTree(trace.httpCalls()));
 
         ObjectNode attributes = root.putObject("attributes");
         trace.getAttributes().forEach(attributes::put);
+        return root;
+    }
 
+    public ObjectNode toJson(Trace trace) {
+        ObjectNode root = metadata(trace);
         ObjectNode contextParams = root.putObject("contextParams");
         for (String jvmArg : config.getContextParams().getJvmArgs()) {
             String value = System.getProperty(jvmArg);

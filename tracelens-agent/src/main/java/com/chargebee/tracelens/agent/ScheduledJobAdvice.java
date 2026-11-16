@@ -13,14 +13,14 @@ public final class ScheduledJobAdvice {
     private ScheduledJobAdvice() {
     }
 
-    @Advice.OnMethodEnter
+    @Advice.OnMethodEnter(suppress = Throwable.class)
     public static String enter(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method) {
         String simple = type.substring(type.lastIndexOf('.') + 1);
         return TraceRuntime.beginLifecycle(null, simple + "." + method, "scheduler",
                 "SCHEDULER", null);
     }
 
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
     public static void exit(@Advice.Enter String segmentId, @Advice.Thrown Throwable thrown) {
         TraceRuntime.endLifecycle(segmentId);
     }

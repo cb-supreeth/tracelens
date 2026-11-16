@@ -46,7 +46,7 @@ def agentJar = project(':tracelens-agent').tasks.named('shadowJar')
             args sourceSets["${servletApi}Fixture"].output.classesDirs.singleFile.absolutePath, servletApi
             jvmArgs "-javaagent:${agentJar.get().archiveFile.get().asFile.absolutePath}=standalone",
                     "-Dtracelens.configPath=${file('src/smoke/resources/tracelens.json').absolutePath}",
-                    '-Dtracelens.port=0', '-Dtracelens.http.includePaths=/api',
+                    '-Dtracelens.port=0',
                     '-Dsun.net.http.allowRestrictedHeaders=true'
         }
     }

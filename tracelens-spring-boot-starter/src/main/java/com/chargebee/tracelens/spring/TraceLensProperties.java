@@ -26,12 +26,25 @@ public class TraceLensProperties {
     private List<String> blacklistedNodes = new ArrayList<>();
     private boolean capturePayloads = false;
     private long maxTrackedEvents = 500_000;
+    private long maxTrackedBytes = 256L * 1024 * 1024;
+    private long maxSegmentBytes = 32L * 1024 * 1024;
+    private String captureMode = "detailed";
+    private List<String> detailedCapturePaths = new ArrayList<>();
+    private long detailedCaptureUntilEpochMillis;
     private int maxTrackedRequests = 200;
+    private int httpRetentionPercent = 75;
     private long idleTtlMinutes = 60;
     private boolean evictOnExport = true;
     private boolean trackMethods = true;
     private boolean trackExceptions = true;
     private boolean instrumentExecutors = true;
+    private boolean captureDataStoreBoundaries = true;
+    private boolean captureJdbcQueries = false;
+    private boolean captureJdbcParameters = false;
+    private boolean captureClickHouseQueries = false;
+    private boolean captureClickHouseParameters = false;
+    private int maxSqlLength = 4096;
+    private int maxSqlQueriesPerRequest = 100;
 
     /** When true, only requests carrying tracelens-id + tracelens-user are traced. */
     private boolean requireLabels = false;
@@ -115,6 +128,17 @@ public class TraceLensProperties {
         return maxTrackedEvents;
     }
 
+    public long getMaxTrackedBytes() { return maxTrackedBytes; }
+    public TraceLensProperties setMaxTrackedBytes(long value) { maxTrackedBytes = value; return this; }
+    public long getMaxSegmentBytes() { return maxSegmentBytes; }
+    public TraceLensProperties setMaxSegmentBytes(long value) { maxSegmentBytes = value; return this; }
+    public String getCaptureMode() { return captureMode; }
+    public TraceLensProperties setCaptureMode(String value) { captureMode = value; return this; }
+    public List<String> getDetailedCapturePaths() { return detailedCapturePaths; }
+    public TraceLensProperties setDetailedCapturePaths(List<String> value) { detailedCapturePaths = value; return this; }
+    public long getDetailedCaptureUntilEpochMillis() { return detailedCaptureUntilEpochMillis; }
+    public TraceLensProperties setDetailedCaptureUntilEpochMillis(long value) { detailedCaptureUntilEpochMillis = value; return this; }
+
     public TraceLensProperties setMaxTrackedEvents(long maxTrackedEvents) {
         this.maxTrackedEvents = maxTrackedEvents;
         return this;
@@ -126,6 +150,15 @@ public class TraceLensProperties {
 
     public TraceLensProperties setMaxTrackedRequests(int maxTrackedRequests) {
         this.maxTrackedRequests = maxTrackedRequests;
+        return this;
+    }
+
+    public int getHttpRetentionPercent() {
+        return httpRetentionPercent;
+    }
+
+    public TraceLensProperties setHttpRetentionPercent(int httpRetentionPercent) {
+        this.httpRetentionPercent = httpRetentionPercent;
         return this;
     }
 
@@ -174,8 +207,54 @@ public class TraceLensProperties {
         return this;
     }
 
+    public boolean isCaptureDataStoreBoundaries() {
+        return captureDataStoreBoundaries;
+    }
+
+    public TraceLensProperties setCaptureDataStoreBoundaries(boolean captureDataStoreBoundaries) {
+        this.captureDataStoreBoundaries = captureDataStoreBoundaries;
+        return this;
+    }
+
     public boolean isRequireLabels() {
         return requireLabels;
+    }
+
+    public boolean isCaptureJdbcQueries() { return captureJdbcQueries; }
+
+    public boolean isCaptureJdbcParameters() { return captureJdbcParameters; }
+
+    public TraceLensProperties setCaptureJdbcParameters(boolean captureJdbcParameters) {
+        this.captureJdbcParameters = captureJdbcParameters;
+        return this;
+    }
+
+    public TraceLensProperties setCaptureJdbcQueries(boolean captureJdbcQueries) {
+        this.captureJdbcQueries = captureJdbcQueries;
+        return this;
+    }
+
+    public boolean isCaptureClickHouseQueries() { return captureClickHouseQueries; }
+    public TraceLensProperties setCaptureClickHouseQueries(boolean value) {
+        captureClickHouseQueries = value; return this;
+    }
+    public boolean isCaptureClickHouseParameters() { return captureClickHouseParameters; }
+    public TraceLensProperties setCaptureClickHouseParameters(boolean value) {
+        captureClickHouseParameters = value; return this;
+    }
+
+    public int getMaxSqlLength() { return maxSqlLength; }
+
+    public TraceLensProperties setMaxSqlLength(int maxSqlLength) {
+        this.maxSqlLength = maxSqlLength;
+        return this;
+    }
+
+    public int getMaxSqlQueriesPerRequest() { return maxSqlQueriesPerRequest; }
+
+    public TraceLensProperties setMaxSqlQueriesPerRequest(int maxSqlQueriesPerRequest) {
+        this.maxSqlQueriesPerRequest = maxSqlQueriesPerRequest;
+        return this;
     }
 
     public TraceLensProperties setRequireLabels(boolean requireLabels) {

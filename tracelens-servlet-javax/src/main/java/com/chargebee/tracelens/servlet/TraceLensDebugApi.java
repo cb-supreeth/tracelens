@@ -4,6 +4,7 @@ import com.chargebee.tracelens.bridge.AgentStatus;
 import com.chargebee.tracelens.bridge.TraceRuntime;
 import com.chargebee.tracelens.core.config.TraceLensConfig;
 import com.chargebee.tracelens.core.export.TraceExporter;
+import com.chargebee.tracelens.core.export.TraceProjection;
 import com.chargebee.tracelens.core.store.TraceStore;
 import com.chargebee.tracelens.core.store.TraceSummary;
 import com.chargebee.tracelens.core.trace.Trace;
@@ -16,6 +17,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,12 +31,14 @@ public final class TraceLensDebugApi {
     private final TraceStore store;
     private final TraceExporter exporter;
     private final TraceLensConfig config;
+    private final List<String> httpIncludePaths;
     private final ObjectMapper mapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
     public TraceLensDebugApi(TraceStore store, TraceExporter exporter, TraceLensConfig config) {
         this.store = store;
         this.exporter = exporter;
         this.config = config;
+        this.httpIncludePaths = Collections.unmodifiableList(new ArrayList<>(config.getHttpIncludePaths()));
     }
 
     /**
@@ -64,6 +68,8 @@ public final class TraceLensDebugApi {
             writeJson(resp, traces(store.summaries()));
         } else if (path.startsWith("/export/")) {
             export(path.substring("/export/".length()), req, resp);
+        } else if (path.startsWith("/overview/") || path.startsWith("/events/") || path.startsWith("/request-data/")) {
+            projection(path, req, resp);
         } else if (path.startsWith("/find-by-lens-id/")) {
             List<TraceSummary> matches = new ArrayList<>();
             for (Trace trace : store.findByLensId(path.substring("/find-by-lens-id/".length()))) {
@@ -92,6 +98,7 @@ public final class TraceLensDebugApi {
 
     private static String allowedMethods(String path) {
         if (path.equals("/summary") || path.equals("/traces") || path.startsWith("/export/")
+                || path.startsWith("/overview/") || path.startsWith("/events/") || path.startsWith("/request-data/")
                 || path.startsWith("/find-by-lens-id/") || path.equals("/metadata")
                 || path.equals("/instrumented-classes")) {
             return "GET";
@@ -107,11 +114,18 @@ public final class TraceLensDebugApi {
 
     private ObjectNode summary() {
         ObjectNode node = mapper.createObjectNode();
+        TraceProjection.capabilities(node, config);
+        node.set("retention", mapper.valueToTree(store.retentionSummary()));
         node.put("recordingEnabled", store.isRecordingEnabled());
+        node.putPOJO("httpIncludePaths", httpIncludePaths);
         node.put("traceCount", store.size());
         node.put("totalEvents", store.totalEvents());
         node.put("maxTrackedEvents", config.getMaxTrackedEvents());
         node.put("maxTrackedRequests", config.getMaxTrackedRequests());
+        node.put("captureJdbcQueries", config.isCaptureJdbcQueries());
+        node.put("captureJdbcParameters", config.isCaptureJdbcQueries() && config.isCaptureJdbcParameters());
+        node.put("maxSqlLength", config.getMaxSqlLength());
+        node.put("maxSqlQueriesPerRequest", config.getMaxSqlQueriesPerRequest());
         node.put("agentActive", AgentStatus.agentActive());
         node.put("instrumentedClasses", AgentStatus.instrumentedCount());
         node.put("failedClasses", AgentStatus.failedCount());
@@ -150,8 +164,10 @@ public final class TraceLensDebugApi {
 
     private ObjectNode metadata() {
         ObjectNode node = mapper.createObjectNode();
+        TraceProjection.capabilities(node, config);
         node.put("applicationId", config.getApplicationId());
         node.put("applicationVersion", config.getApplicationVersion());
+        node.putPOJO("httpIncludePaths", httpIncludePaths);
         node.putPOJO("packages", config.getPackages());
         node.putPOJO("excludedPackages", config.getExcludedPackages());
         node.putPOJO("blacklistedNodes", config.getBlacklistedNodes());
@@ -159,6 +175,8 @@ public final class TraceLensDebugApi {
         node.put("trackMethods", config.isTrackMethods());
         node.put("trackExceptions", config.isTrackExceptions());
         node.put("instrumentExecutors", config.isInstrumentExecutors());
+        node.put("instrumentScheduled", config.isInstrumentScheduled());
+        node.putPOJO("chargebeeJobTypes", config.getChargebeeJobTypes());
         node.put("idleTtlMinutes", config.getIdleTtlMinutes());
         node.put("evictOnExport", config.isEvictOnExport());
         node.put("agentActive", AgentStatus.agentActive());
@@ -195,6 +213,21 @@ public final class TraceLensDebugApi {
     private void writeJson(HttpServletResponse resp, ObjectNode node) throws IOException {
         prepareJson(resp);
         resp.getWriter().write(mapper.writeValueAsString(node));
+    }
+
+    private void projection(String path, HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String operation = path.substring(1, path.indexOf('/', 1));
+        Optional<Trace> found = store.get(path.substring(operation.length() + 2));
+        if (!found.isPresent()) { error(resp, 404, "no such trace"); return; }
+        try {
+            TraceProjection projection = new TraceProjection(exporter);
+            java.util.Map<String, String> params = TraceProjection.query(req.getQueryString());
+            if (!"events".equals(operation) && !params.isEmpty()) throw new IllegalArgumentException("No query accepted for this projection");
+            ObjectNode result = "overview".equals(operation) ? projection.overview(found.get())
+                    : "events".equals(operation) ? projection.events(found.get(), params) : projection.requestData(found.get());
+            prepareJson(resp);
+            resp.getWriter().write(TraceProjection.serialize(result));
+        } catch (IllegalArgumentException invalid) { error(resp, 400, invalid.getMessage()); }
     }
 
     private static void prepareJson(HttpServletResponse resp) {

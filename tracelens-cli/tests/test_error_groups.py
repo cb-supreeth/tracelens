@@ -146,6 +146,22 @@ def test_exception_only_completed_unknown_and_active_are_not_failures():
     assert result["partial"]  # active evidence can still change
 
 
+def test_scheduler_failure_is_explicit_and_skipped_control_flow_is_not_an_error():
+    job = dict(entryChannel="SCHEDULER", httpStatus=None, path="", httpMethod="", exceptionCount=3,
+               jobType="compute_billing_metrics", jobId="42", scheduler="chargebee")
+    for outcome in ("SUCCEEDED", "SKIPPED", "UNKNOWN", "RUNNING", None):
+        assert not build([segment(**job, jobOutcome=outcome, jobAuditStatus="IGNORED")])["groups"]
+    result = build([segment(**job, attributes={"jobOutcome": "FAILED", "jobAuditStatus": "RESCHEDULE_FAILED",
+        "jobFailureType": "java.lang.IllegalStateException", "payload": "SECRET_JOB_PAYLOAD"})])
+    assert result["groups"][0]["category"] == "execution"
+    assert result["groups"][0]["exceptionClass"] == "java.lang.IllegalStateException"
+    request = result["requests"][0]
+    assert request["outcome"] == "error" and request["hasErrors"]
+    assert request["jobOutcome"] == "FAILED" and request["jobAuditStatus"] == "RESCHEDULE_FAILED"
+    assert request["jobType"] == "compute_billing_metrics" and request["jobId"] == "42"
+    assert "SECRET_JOB_PAYLOAD" not in json.dumps(result)
+
+
 def test_boundary_exception_class_optional_filterable_and_not_a_free_message():
     rows = [segment(filterException="java.net.SocketTimeoutException"),
             segment("second", traceId="2" * 32, filterException="SECRET message including user token")]

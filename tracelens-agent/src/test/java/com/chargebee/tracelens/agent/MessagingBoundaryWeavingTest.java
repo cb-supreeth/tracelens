@@ -42,6 +42,7 @@ class MessagingBoundaryWeavingTest {
             SendMessageRequest sqsRequest = new SendMessageRequest();
             new SqsClient().sendMessage(sqsRequest);
             assertThat(sqsRequest.attributeWrites).isZero();
+            assertThat(sqsRequest.attributeReads).isZero();
             new SqsClient().sendMessageBatch(new SendMessageBatchRequest());
             new KafkaProducer().send(new ProducerRecord());
             new KafkaConsumer().poll(java.time.Duration.ofMillis(10));
@@ -61,6 +62,8 @@ class MessagingBoundaryWeavingTest {
             MessagingBoundaryRuntime.configure(true, true);
             new SqsClient().sendMessage(sqsRequest);
             assertThat(sqsRequest.attributeWrites).isGreaterThan(0);
+            assertThat(SqsClient.observedAttributes).containsKey(TraceSnapshot.TRACE_ID_KEY);
+            assertThat(sqsRequest.writtenAttributes).isEmpty();
         }
         int before = events.size();
         new KafkaConsumer().poll(10);
@@ -70,7 +73,11 @@ class MessagingBoundaryWeavingTest {
     }
 
     public static class SqsClient implements AmazonSQS {
-        public Object sendMessage(SendMessageRequest request) { return new Object(); }
+        static Map<String, com.amazonaws.services.sqs.model.MessageAttributeValue> observedAttributes;
+        public Object sendMessage(SendMessageRequest request) {
+            observedAttributes = new LinkedHashMap<>(request.writtenAttributes);
+            return new Object();
+        }
         public Object sendMessageBatch(SendMessageBatchRequest request) { return new Object(); }
     }
     public static class Handler extends AbstractQueuemanMessageHandler { }

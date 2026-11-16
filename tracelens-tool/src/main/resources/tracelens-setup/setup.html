@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="tracelens-setup-token" content="__TRACELENS_SETUP_TOKEN__">
+  <title>Local configuration · TraceLens</title>
+  <link rel="stylesheet" href="/setup.css">
+  <script src="/setup.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to setup</a>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">T</span>Trace<span>Lens</span><span class="brand-divider"></span><span class="brand-label">Local configuration</span></div>
+    <span class="local-badge"><span aria-hidden="true"></span>On this machine only</span>
+  </header>
+  <main id="main" class="shell">
+    <section class="intro" aria-labelledby="page-title">
+      <p class="eyebrow">DEVELOPER WORKSPACE</p>
+      <h1 id="page-title">A clearer view of your requests.</h1>
+      <p>Set up a new workspace, or adjust the services you already trace. Nothing starts or restarts when you open this page.</p>
+    </section>
+    <nav id="setup-progress" class="steps" aria-label="Setup progress" hidden>
+      <ol>
+        <li id="step-configure" aria-current="step"><span class="step-number">1</span><span>Set up<small id="configure-step-detail">Services &amp; locations</small></span></li>
+        <li id="step-review"><span class="step-number">2</span><span>Review<small>Check the exact changes</small></span></li>
+        <li id="step-done"><span class="step-number">3</span><span>Saved<small>Verify a useful trace next</small></span></li>
+      </ol>
+    </nav>
+    <div id="status" class="status-message" role="status" aria-live="polite">Loading local setup defaults…</div>
+    <div id="error" class="error-message" role="alert" tabindex="-1" hidden></div>
+    <button id="retry-defaults" class="button secondary" type="button" hidden>Retry loading defaults</button>
+
+    <section id="landing-view" aria-labelledby="landing-heading">
+      <h2 id="landing-heading" class="visually-hidden" tabindex="-1">Choose how to use TraceLens</h2>
+      <div class="entry-grid">
+        <section class="card entry-card"><p class="eyebrow">FIRST TIME</p><h2>Set up TraceLens</h2><p>Select your local services and locations, choose capture levels, then review the installation.</p><button id="choose-setup" class="button primary" type="button" disabled>Set up TraceLens <span aria-hidden="true">→</span></button></section>
+        <section class="card entry-card"><p class="eyebrow">ALREADY INSTALLED</p><h2>Edit capture settings</h2><p>Open your saved installation. Adjust one service, add another, or review service actions separately.</p><button id="choose-existing" class="button secondary" type="button" disabled>Edit capture settings <span aria-hidden="true">→</span></button></section>
+      </div>
+      <p class="muted">Both flows use this local, time-limited session. Saving configuration never restarts an application.</p>
+    </section>
+
+    <section id="existing-load-view" aria-labelledby="existing-load-heading" hidden>
+      <div class="section-heading"><div><p class="eyebrow">EXISTING WORKSPACE</p><h2 id="existing-load-heading" tabindex="-1">Open your installation</h2></div><button id="landing-back" class="button secondary" type="button">Back</button></div>
+      <form id="existing-load-form" class="card">
+        <label class="field" for="existing-install-dir"><span>TraceLens install directory</span><input id="existing-install-dir" type="text" required autocomplete="off" spellcheck="false"><small>The wizard-managed directory containing your saved TraceLens configuration. Loading does not save files or restart services.</small></label>
+        <div class="load-actions"><button id="load-dashboard" class="button primary" type="submit">Load services</button></div>
+      </form>
+    </section>
+
+    <section id="dashboard-view" aria-labelledby="dashboard-heading" hidden>
+      <div class="section-heading"><div><p class="eyebrow">YOUR WORKSPACE</p><h2 id="dashboard-heading" tabindex="-1">Configured services</h2></div><button id="dashboard-change-install" class="button secondary" type="button">Change installation</button></div>
+      <div class="dashboard-toolbar"><code id="dashboard-install"></code><div class="dashboard-buttons"><button id="dashboard-refresh" class="button secondary" type="button">Reload configuration</button><button id="dashboard-add-service" class="button secondary" type="button">Add service</button><button id="dashboard-service-actions" class="button secondary" type="button">Service actions</button></div></div>
+      <p id="dashboard-connection-note" class="muted" role="status">Connection not checked. Configured does not mean running.</p>
+      <div id="dashboard-services" class="dashboard-grid"></div>
+      <p class="muted">Configure one service at a time. Saving affects only reviewed settings; start / restart actions require separate consent.</p>
+    </section>
+
+    <section id="configure-view" aria-labelledby="configure-heading" hidden>
+      <details id="setup-prerequisites" class="card prerequisites" aria-labelledby="prerequisites-heading">
+        <summary>Before you start · local app prerequisites</summary>
+        <div class="prerequisites-heading"><p class="eyebrow">PREREQUISITES</p><h2 id="prerequisites-heading">Before you start</h2><p>TraceLens adds tracing to an application that already works locally.</p></div>
+        <ul class="prerequisite-grid">
+          <li><span class="prerequisite-number" aria-hidden="true">01</span><div><h3>Run the selected services locally first</h3><p>Use each selected service's normal native setup. If cb-app is selected, use <strong>Java 8</strong>. Confirm the selected services start successfully without TraceLens.</p></div></li>
+          <li><span class="prerequisite-number" aria-hidden="true">02</span><div><h3>Try the flow you want to trace</h3><p>Use your normal local login or API authentication and reproduce the flow. Have its required database, cache, downstream services and test data ready.</p></div></li>
+          <li><span class="prerequisite-number" aria-hidden="true">03</span><div><h3>Check each selected service</h3><p>EMS and Plans use <strong>Java 21</strong>; Ledger and Grant Orchestrator keep their existing <strong>application runtime / Tomcat launcher</strong>. If the flow calls a downstream service, connect its caller to it locally and verify the flow first.</p></div></li>
+          <li><span class="prerequisite-number" aria-hidden="true">04</span><div><h3>Have your source paths ready</h3><p>Use the local checkouts matching your running application builds so the displayed source lines are meaningful.</p></div></li>
+        </ul>
+        <p class="prerequisites-note"><strong>Confirm once, then configure.</strong> Apps do not need to stay running during setup. Stop/restart them deliberately when attaching tracing; do not launch duplicate instances. Opening this page or saving settings does not build apps, provision dependencies or restart services. Optional service actions require a separate review after saving.</p>
+      </details>
+      <form id="setup-form">
+        <fieldset id="configuration" class="configuration" disabled>
+          <legend class="visually-hidden">TraceLens configuration</legend>
+          <div class="section-heading"><div><p id="configure-eyebrow" class="eyebrow">01 / SERVICES &amp; LOCATIONS</p><h2 id="configure-heading" tabindex="-1">Services &amp; locations</h2></div><button id="editor-back-button" class="button secondary" type="button" hidden>Back to services · discard edits</button><button id="setup-back-button" class="button secondary" type="button">Back</button></div>
+          <p id="configure-description" class="muted">Choose working local services. Capture options come next.</p>
+          <section id="workspace-settings" class="card workspace-card" aria-labelledby="workspace-heading">
+            <h3 id="workspace-heading">Installation &amp; viewer</h3>
+            <div class="workspace-grid">
+              <label class="field" for="install-dir"><span>Install directory</span><input id="install-dir" name="installDir" type="text" required autocomplete="off" spellcheck="false" aria-describedby="install-help"><small id="install-help">Choose a new local directory. To update an installation, use Edit capture settings instead. Use an absolute path without spaces, quotes, or shell syntax.</small></label>
+              <label class="field" for="viewer-port"><span>Viewer port</span><input id="viewer-port" name="viewerPort" type="number" required min="1" max="65535" inputmode="numeric"><small>The request viewer stays on loopback.</small></label>
+            </div>
+          </section>
+          <div id="service-selection-heading" class="services-heading"><h3>Which services do you want to trace?</h3><span class="muted">Select at least one</span></div>
+          <div id="configuration-services" class="service-grid">
+            <section class="card service-card" id="cb-app-card" aria-labelledby="cb-app-heading">
+              <label class="service-choice" for="cb-app-enabled"><input id="cb-app-enabled" type="checkbox" checked><span><strong id="cb-app-heading">cb-app</strong><small>Local application checkout</small></span><span class="service-tag" aria-hidden="true">APP</span></label>
+              <fieldset id="cb-app-fields" class="service-fields"><legend class="visually-hidden">cb-app settings</legend>
+                <label class="field" for="cb-app-source"><span>Source root</span><input id="cb-app-source" type="text" autocomplete="off" spellcheck="false"><small>Absolute path to your cb-app checkout.</small></label>
+                <label class="field" for="cb-app-port"><span>TraceLens debug port</span><input id="cb-app-port" type="text" inputmode="numeric"><small>The agent's local debug HTTP endpoint, not a Java debugger port. Default: 7778.</small></label>
+                <label class="field" for="cb-app-paths"><span>API paths to capture</span><textarea id="cb-app-paths" rows="3" spellcheck="false" aria-describedby="cb-app-paths-help"></textarea><small id="cb-app-paths-help">Use narrow prefixes such as /api/v2/features. 0–64 literal ASCII paths, one per line or comma-separated, up to 512 characters each. No URLs or wildcards. Blank disables incoming HTTP traces; scheduled work and jobs are independent.</small></label>
+              </fieldset>
+            </section>
+            <section class="card service-card" id="ems-card" aria-labelledby="ems-heading">
+              <label class="service-choice" for="ems-enabled"><input id="ems-enabled" type="checkbox"><span><strong id="ems-heading">EMS</strong><small>Standalone service or IDE run</small></span><span class="service-tag" aria-hidden="true">SERVICE</span></label>
+              <fieldset id="ems-fields" class="service-fields" disabled hidden><legend class="visually-hidden">EMS settings</legend>
+                <label class="field" for="ems-source"><span>Source root</span><input id="ems-source" type="text" autocomplete="off" spellcheck="false"><small>Absolute path to your EMS checkout.</small></label>
+                <label class="field" for="ems-port"><span>TraceLens debug port</span><input id="ems-port" type="text" inputmode="numeric"><small>Use a different port from other services and the viewer. Default: 7779.</small></label>
+                <label class="field" for="ems-paths"><span>API paths to capture</span><textarea id="ems-paths" rows="3" spellcheck="false"></textarea><small>Use EMS paths such as /features or /subscriptions, not cb-app's /api/v2 paths. 0–64 literal ASCII prefixes, up to 512 characters each; no URLs or wildcards. Blank disables incoming HTTP traces; scheduled work and jobs are independent.</small></label>
+                <details class="advanced"><summary>Optional: launch a ready-built EMS JAR</summary><div class="advanced-fields">
+                  <label class="field" for="ems-jar"><span>Application JAR <span class="optional">optional, with Java home</span></span><input id="ems-jar" type="text" autocomplete="off" spellcheck="false"><small>Absolute path to an existing runnable JAR, without spaces or shell syntax. Setup never builds it.</small></label>
+                  <label class="field" for="ems-java"><span>Java 21 home <span class="optional">required with a JAR</span></span><input id="ems-java" type="text" autocomplete="off" spellcheck="false"><small>Provide the explicit JDK 21 directory, without spaces or shell syntax. To use your IDE instead, leave both launcher fields blank.</small></label>
+                </div></details>
+                <p class="service-note">Without a JAR, setup generates VM options for your IDE. Use your own IDE startup, or register a supported managed launcher after saving. Stop an unmanaged instance manually before its first managed Start.</p>
+              </fieldset>
+            </section>
+            <section class="card service-card" id="plans-card" aria-labelledby="plans-heading">
+              <label class="service-choice" for="plans-enabled"><input id="plans-enabled" type="checkbox"><span><strong id="plans-heading">Plans</strong><small>Java 21 · standalone JAR or IDE</small></span><span class="service-tag" aria-hidden="true">SERVICE</span></label>
+              <fieldset id="plans-fields" class="service-fields" disabled hidden><legend class="visually-hidden">Plans settings</legend>
+                <label class="field" for="plans-source"><span>Source root</span><input id="plans-source" type="text" autocomplete="off" spellcheck="false"><small>Absolute path to your cb-plans checkout.</small></label>
+                <label class="field" for="plans-port"><span>TraceLens debug port</span><input id="plans-port" type="text" inputmode="numeric"><small>Use a unique local agent port. Default: 7786.</small></label>
+                <label class="field" for="plans-paths"><span>API paths to capture</span><textarea id="plans-paths" rows="3" spellcheck="false"></textarea><small>Use paths received by Plans: 0–64 literal prefixes, one per line or comma-separated; no URLs or wildcards. Blank disables incoming HTTP traces; scheduled work and jobs are independent.</small></label>
+                <details class="advanced"><summary>Optional: launch a ready-built Plans JAR</summary><div class="advanced-fields">
+                  <label class="field" for="plans-jar"><span>Application JAR <span class="optional">optional, with Java home</span></span><input id="plans-jar" type="text" autocomplete="off" spellcheck="false"><small>Absolute path to an existing runnable JAR. Setup never builds it.</small></label>
+                  <label class="field" for="plans-java"><span>Java 21 home <span class="optional">required with a JAR</span></span><input id="plans-java" type="text" autocomplete="off" spellcheck="false"><small>Explicit JDK 21 directory. Leave both launcher fields blank to use your IDE.</small></label>
+                </div></details>
+                <p class="service-note">Without a JAR, use the generated VM options in your own IDE, or register a supported managed launcher after saving. Stop an unmanaged instance manually before its first managed Start.</p>
+              </fieldset>
+            </section>
+            <section class="card service-card" id="ledger-card" aria-labelledby="ledger-heading">
+              <label class="service-choice" for="ledger-enabled"><input id="ledger-enabled" type="checkbox"><span><strong id="ledger-heading">Ledger</strong><small>Existing application runtime / Tomcat launcher</small></span><span class="service-tag" aria-hidden="true">SERVICE</span></label>
+              <fieldset id="ledger-fields" class="service-fields" disabled hidden><legend class="visually-hidden">Ledger settings</legend>
+                <label class="field" for="ledger-source"><span>Source root</span><input id="ledger-source" type="text" autocomplete="off" spellcheck="false"><small>Absolute path to your consumption-ledger checkout.</small></label>
+                <label class="field" for="ledger-port"><span>TraceLens debug port</span><input id="ledger-port" type="text" inputmode="numeric"><small>Use a unique local agent port. Default: 7783.</small></label>
+                <label class="field" for="ledger-paths"><span>API paths to capture</span><textarea id="ledger-paths" rows="3" spellcheck="false"></textarea><small>Use paths received by Ledger: 0–64 literal prefixes, one per line or comma-separated; no URLs or wildcards. Blank disables incoming HTTP traces; scheduled work and jobs are independent.</small></label>
+                <p class="service-note">Setup generates vm-options.txt for your existing application runtime / Tomcat startup environment. Restart manually, or register a supported managed launcher after saving. Existing application launchers are not replaced.</p>
+              </fieldset>
+            </section>
+            <section class="card service-card" id="go-card" aria-labelledby="go-heading">
+              <label class="service-choice" for="go-enabled"><input id="go-enabled" type="checkbox"><span><strong id="go-heading">Grant Orchestrator</strong><small>Existing application runtime / Tomcat launcher</small></span><span class="service-tag" aria-hidden="true">SERVICE</span></label>
+              <fieldset id="go-fields" class="service-fields" disabled hidden><legend class="visually-hidden">Grant Orchestrator settings</legend>
+                <label class="field" for="go-source"><span>Source root</span><input id="go-source" type="text" autocomplete="off" spellcheck="false"><small>Absolute path to your grant-orchestrator checkout.</small></label>
+                <label class="field" for="go-port"><span>TraceLens debug port</span><input id="go-port" type="text" inputmode="numeric"><small>Use a unique local agent port. Default: 7784.</small></label>
+                <label class="field" for="go-paths"><span>API paths to capture</span><textarea id="go-paths" rows="3" spellcheck="false"></textarea><small>Use paths received by Grant Orchestrator: 0–64 literal prefixes, one per line or comma-separated; no URLs or wildcards. Blank disables incoming HTTP traces; scheduled work and jobs are independent.</small></label>
+                <p class="service-note">Setup generates vm-options.txt for your existing application runtime / Tomcat startup environment. Restart manually, or register a supported managed launcher after saving. Existing application launchers are not replaced.</p>
+              </fieldset>
+            </section>
+          </div>
+          <p id="capture-privacy-note" class="sensitive-note"><span aria-hidden="true">!</span><span>Request bodies, query strings, SQL and bindings can contain credentials or personal data. Redaction is best-effort, not a guarantee. Keep captures local and review before sharing. Changing capture settings requires a service restart; saving alone does not change a running service.</span></p>
+          <div class="action-bar"><p id="configure-action-help">No files are written until you review and confirm.</p><div class="dashboard-buttons"><button id="services-back-button" class="button secondary" type="button" hidden>Back to services &amp; locations</button><button id="capture-next-button" class="button primary" type="button">Choose capture levels <span aria-hidden="true">→</span></button><button id="review-button" class="button primary" type="submit" hidden>Review changes <span aria-hidden="true">→</span></button></div></div>
+        </fieldset>
+      </form>
+    </section>
+
+    <section id="review-view" aria-labelledby="review-heading" hidden>
+      <div class="section-heading"><div><p class="eyebrow">02 / REVIEW</p><h2 id="review-heading" tabindex="-1">Here's exactly what will change</h2></div><button id="edit-button" class="button secondary" type="button">Edit configuration</button></div>
+      <p class="muted">Nothing has been written yet. Installation is limited to the file plan below.</p>
+      <div id="review-summary" class="summary-strip"></div>
+      <section id="review-services" class="card" aria-label="Service outcomes" hidden></section>
+      <section id="review-warnings" class="warning-card" aria-label="Setup warnings" hidden></section>
+      <section class="card file-card" aria-labelledby="files-heading"><div class="card-heading"><h3 id="files-heading">Planned local files</h3><span id="file-count" class="muted"></span></div><div class="table-scroll"><table><thead><tr><th scope="col">Action</th><th scope="col">Exact path &amp; purpose</th></tr></thead><tbody id="planned-files"></tbody></table></div></section>
+      <details class="card commands-disclosure"><summary>Generated commands · for you to run later</summary><div id="planned-commands" class="commands"></div></details>
+      <div class="review-consent"><label class="check-row" for="review-ack"><input id="review-ack" type="checkbox"><span>I reviewed the paths, setting changes, file changes, and warnings above.</span></label><p>Saving writes only the reviewed local files. It does not start the viewer or change a running service.</p></div>
+      <div class="action-bar"><p>Changed your mind? Go back and edit. A new review is required.</p><button id="apply-button" class="button primary" type="button" disabled>Save reviewed files <span aria-hidden="true">→</span></button></div>
+    </section>
+
+    <section id="done-view" aria-labelledby="done-heading" hidden>
+      <div class="done-intro"><span class="done-icon" aria-hidden="true">✓</span><p class="eyebrow">03 / SAVED</p><h2 id="done-heading" tabindex="-1">Your local configuration is saved.</h2><p id="done-description">The reviewed files are in place. No application has been started or restarted.</p></div>
+      <div id="done-summary" class="summary-strip"></div>
+      <section id="done-services" class="card" aria-label="Installed and skipped services" hidden></section>
+      <section id="done-warnings" class="warning-card" aria-label="Installation warnings" hidden></section>
+      <section id="verify-capture" class="card next-steps" aria-labelledby="verify-heading">
+        <h3 id="verify-heading">Next: apply the saved settings</h3>
+        <p class="muted">Files saved, agent connected and request captured are separate milestones. Only the file save is confirmed here; no capture has been verified.</p>
+        <ol class="capture-progress" aria-label="First useful capture progression">
+          <li class="saved-milestone"><strong>Saved</strong><span>Reviewed files are on disk.</span></li>
+          <li aria-current="step"><strong>Apply / restart explicitly</strong><span>Save needed live evidence first. Review service actions, or use your existing launcher with the saved options; then check your normal health or login workflow.</span></li>
+          <li><strong>Open viewer</strong><span>Use start-viewer.sh from this installation. Enter the exact backend API path and choose Check capture readiness.</span></li>
+          <li><strong>Reproduce once</strong><span>Choose Watch next request &amp; save. Wait for Watching, then reproduce in your normal authenticated application or API client. Nothing is replayed automatically.</span></li>
+          <li><strong>Inspect evidence</strong><span>Confirm the expected request, services and detail; read partial-evidence warnings. Missing evidence is not proof of non-execution. For jobs, use Scheduled jobs and save the observed run.</span></li>
+        </ol>
+        <button id="done-service-actions" class="button primary" type="button" hidden>Review apply / restart actions</button>
+        <p class="muted">Reviewing actions does not run them. Starting or restarting needs separate review and consent.</p>
+        <a id="verify-viewer-link" class="button secondary" target="_blank" rel="noopener noreferrer" hidden>Open viewer investigation</a>
+        <p class="muted viewer-handoff-note">Opens the configured local viewer in a new tab. It must already be running; opening it does not check readiness, arm a watch or start a service.</p>
+      </section>
+      <section id="restart-section" class="card" aria-labelledby="restart-heading" hidden>
+        <h3 id="restart-heading" tabindex="-1">Optional: start or restart selected services</h3>
+        <p class="muted">Configuration is saved first. Only a supported launcher or a verified setup-managed process can be controlled here. Stop an existing unmanaged instance manually before its first managed Start; this page will not kill a process merely because it uses a port. Managed launches use the current bundle. For a manual restart, update your agent JAR to the current bundle to use Methods capture.</p>
+        <p class="restart-warning">Restarting interrupts requests and loses in-memory traces. Saved captures are retained. Save any traces you need before continuing.</p>
+        <div id="restart-services" class="restart-choices"></div>
+        <button id="restart-plan-button" class="button secondary" type="button" disabled>Review service actions</button>
+        <div id="restart-review" hidden>
+          <div id="restart-plan"></div>
+          <label class="check-row" for="restart-ack"><input id="restart-ack" type="checkbox"><span>I reviewed the selected service actions and accept downtime and loss of in-memory traces.</span></label>
+          <button id="restart-apply-button" class="button primary" type="button" disabled>Run reviewed service actions</button>
+        </div>
+        <div id="restart-result" role="status" aria-live="polite"></div>
+      </section>
+      <details id="installation-next-steps" class="card commands-disclosure"><summary>Manual startup with your existing IDE or launcher</summary><p>Run only the generated commands you need, when you're ready. Existing services are not stopped automatically.</p><p id="ide-next-step">For <span id="ide-services"></span>, add the generated vm-options.txt to your existing IDE or Tomcat startup configuration with the matching JDK, then restart that service manually.</p></details>
+      <details id="done-command-section" class="card commands-disclosure"><summary id="commands-heading">Generated commands · not run by setup</summary><div id="done-commands" class="commands"></div></details>
+      <details id="installed-disclosure" class="card installed-disclosure"><summary>Saved file inventory</summary><ul id="installed-files" class="installed-files"></ul></details>
+      <div class="action-bar"><p>Return to your service dashboard to configure another service or add one.</p><button id="done-edit-button" class="button secondary" type="button">Back to services</button></div>
+      <p class="finish-note">You can close this page. Stop the setup server in its terminal when you're finished.</p>
+    </section>
+    <footer><span>TraceLens · local observability</span><span>Setup session expires __TRACELENS_SETUP_MINUTES__ minutes after launch.</span></footer>
+  </main>
+  <noscript><p class="error-message">JavaScript is required for the local setup wizard. Enable it and reload; no files have been installed.</p></noscript>
+</body>
+</html>

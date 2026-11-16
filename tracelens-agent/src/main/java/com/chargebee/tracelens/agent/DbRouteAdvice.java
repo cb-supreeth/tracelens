@@ -13,7 +13,7 @@ public final class DbRouteAdvice {
     private DbRouteAdvice() {
     }
 
-    @Advice.OnMethodExit
+    @Advice.OnMethodExit(suppress = Throwable.class)
     public static void exit(@Advice.Return Object lookupKey) {
         if (lookupKey != null) {
             TraceRuntime.onDbRoute(String.valueOf(lookupKey));

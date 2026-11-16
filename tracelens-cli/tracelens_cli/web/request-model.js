@@ -53,11 +53,13 @@
     const boundaryException = !!filterException && filterException.toLowerCase() !== "false";
     const asyncTimeout = trueFlag(row.asyncTimeout) || trueFlag(attrs.asyncTimeout);
     const exceptions = firstNumber(row.exceptionCount, attrs.exceptionCount) || 0;
+    const channel = firstText(row.entryChannel, row.channel, attrs.entryChannel).toUpperCase() || "UNKNOWN";
+    const jobOutcome = firstText(row.jobOutcome, attrs.jobOutcome).toUpperCase() || null;
     // A caught exception may be normal recovery. Even filterException can be
     // captured at a nested boundary before an outer layer recovers with HTTP200.
     // Only explicit timeout/failure or HTTP error status establish failure.
     const hasErrors = httpStatus >= 400 || status === "FAILED" || status === "ERROR" || row.hasErrors === true
-      || asyncTimeout;
+      || asyncTimeout || (channel === "SCHEDULER" && jobOutcome === "FAILED");
     const hasExceptions = row.hasExceptions === true || exceptions > 0 || boundaryException
       || (Array.isArray(row.events) && row.events.some((event) => object(event).type === "EXCEPTION"));
     return { ...row, attributes: attrs, traceId: validTraceId(row.traceId),
@@ -70,7 +72,12 @@
         attrs.routeTemplate, attrs.httpRoute, attrs.httpRouteTemplate, attrs["http.route"], attrs.route),
       user: firstText(row.user, attrs.user),
       site: firstScalar(row.siteId, row.site, attrs.siteId, attrs.site),
-      channel: firstText(row.entryChannel, row.channel, attrs.entryChannel).toUpperCase() || "UNKNOWN",
+      channel, jobOutcome,
+      jobType: firstText(row.jobType, attrs.jobType) || null,
+      jobId: firstScalar(row.jobId, attrs.jobId) || null,
+      jobAuditStatus: firstText(row.jobAuditStatus, attrs.jobAuditStatus).toUpperCase() || null,
+      jobFailureType: firstText(row.jobFailureType, attrs.jobFailureType) || null,
+      scheduler: firstText(row.scheduler, attrs.scheduler) || null,
       parentSpanId: parentValue(row, attrs, "parentSpanId"),
       parentSegmentId: parentValue(row, attrs, "parentSegmentId"),
       label: firstText(row.lensId, row.label, attrs.lensId), status, httpStatus, hasErrors, hasExceptions,
@@ -114,22 +121,28 @@
       const rootMissing = roots.length !== 1;
       const root = roots.length === 1 ? roots[0] : (roots[0] || segments[0]);
       const hasErrors = segments.some((segment) => segment.hasErrors);
-      const active = segments.some((segment) => segment.status === "ACTIVE");
-      // Success requires affirmative HTTP evidence on a credible root; COMPLETED
-      // and EXPORTED are lifecycle labels, not a business outcome.
-      const successful = !rootMissing && root.httpStatus >= 200 && root.httpStatus < 400;
+      const active = segments.some((segment) => segment.status === "ACTIVE"
+        || (segment.channel === "SCHEDULER" && segment.jobOutcome === "RUNNING"));
+      // Success requires affirmative root evidence. Scheduler lifecycle labels
+      // (COMPLETED/EXPORTED) and exception events do not establish job outcomes.
+      const job = root.channel === "SCHEDULER";
+      const successful = !rootMissing && (job ? root.jobOutcome === "SUCCEEDED"
+        : root.httpStatus >= 200 && root.httpStatus < 400);
+      const skipped = !rootMissing && job && root.jobOutcome === "SKIPPED";
       const observedStarts = segments.map((segment) => segment.startedAtMillis).filter((n) => n !== null);
       const activity = segments.map((segment) => segment.lastActivityMillis).filter((n) => n !== null);
       return { key, traceId: segments[0].traceId, segments, root, rootMissing, rootAmbiguous: roots.length > 1,
-        label: root.label || [root.method, root.path].filter(Boolean).join(" ") || root.channel + " request",
+        label: root.label || (job && root.jobType) || [root.method, root.path].filter(Boolean).join(" ") || root.channel + " request",
         method: root.method, path: root.path, user: root.user, site: root.site,
+        jobType: root.jobType, jobId: root.jobId, jobOutcome: rootMissing ? null : root.jobOutcome,
+        jobAuditStatus: root.jobAuditStatus, jobFailureType: root.jobFailureType, scheduler: root.scheduler,
         services: [...new Set(segments.map((segment) => segment.service))].sort(), channel: root.channel,
         startedAtMillis: !rootMissing && root.startedAtMillis !== null ? root.startedAtMillis
           : (observedStarts.length ? Math.min(...observedStarts) : null),
         lastActivityMillis: activity.length ? Math.max(...activity) : null,
         durationMs: rootMissing ? null : root.durationMs,
         httpStatus: rootMissing ? null : root.httpStatus,
-        outcome: hasErrors ? "error" : active ? "active" : successful ? "success" : "unknown",
+        outcome: hasErrors ? "error" : active ? "active" : successful ? "success" : skipped ? "skipped" : "unknown",
         hasErrors, hasExceptions: segments.some((segment) => segment.hasExceptions),
         eventCount: segments.reduce((sum, segment) => sum + segment.eventCount, 0) };
     }).sort(requestOrder);
@@ -162,10 +175,45 @@
           && (!user || includes(segment.user, user)) && (!site || segment.site === site))) return false;
       if (query && ![request.traceId, request.label, ...request.segments.flatMap((segment) =>
         [segment.segmentId, segment.service, segment.serviceInstanceId, segment.method, segment.path,
-          segment.routeTemplate, segment.label, segment.user, segment.site])]
+          segment.routeTemplate, segment.label, segment.user, segment.site, segment.jobType, segment.jobId,
+          segment.jobAuditStatus, segment.jobFailureType, segment.scheduler])]
         .some((value) => includes(value, query))) return false;
       return true;
     }).sort(requestOrder);
+  }
+
+  // Summary-only badge projection. Match error-groups' failing-segment filters,
+  // not the ordinary list's observed-service/root-channel selectors. The open
+  // Errors tab still uses its server response as the authoritative count.
+  function filterErrorRequests(requests, suppliedFilters, suppliedErrors, now) {
+    const filters = {...defaults(), ...object(suppliedFilters)};
+    const errors = object(suppliedErrors);
+    const status = numberFilter(errors.httpStatus);
+    if (status.required && (!Number.isInteger(status.value) || status.value < 100 || status.value > 599)) return [];
+    const service = text(filters.service), method = text(filters.method).toUpperCase();
+    const path = text(filters.path), channel = text(filters.channel).toUpperCase(), query = text(filters.query);
+    const category = text(errors.category), exception = text(errors.exceptionClass);
+    const className = /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
+    const candidates = filterRequests(requests, {...filters, service: "", method: "", path: "", channel: "", outcome: "", query: ""}, now);
+    return candidates.filter(request => {
+      if (query && ![request.traceId, request.label, ...request.segments.flatMap(segment =>
+        [segment.segmentId, segment.service, segment.serviceInstanceId, segment.method, segment.path,
+          segment.routeTemplate, segment.label, segment.user, segment.site])].some(value => includes(value, query))) return false;
+      return request.segments.some(segment => {
+        const kind = segment.asyncTimeout ? "timeout" : segment.httpStatus >= 500 ? "http5xx"
+          : segment.httpStatus >= 400 ? "http4xx" : segment.hasErrors ? "execution" : "";
+        const boundary = text(segment.filterException);
+        const boundaryClass = !["true", "false", "null", "none"].includes(boundary.toLowerCase()) && className.test(boundary) ? boundary : "";
+        const failure = text(segment.jobFailureType);
+        const exceptionClass = boundaryClass || (segment.channel === "SCHEDULER" && segment.jobOutcome === "FAILED" && className.test(failure) ? failure : "");
+        return kind && (!service || segment.service === service) && (!method || segment.method === method)
+          && (!channel || segment.channel === channel)
+          && (!path || includes(segment.path, path) || includes(segment.routeTemplate, path))
+          && (!category || category === "all" || kind === category)
+          && (!status.required || segment.httpStatus === status.value)
+          && (!exception || includes(exceptionClass, exception));
+      });
+    });
   }
 
   function bucketRequests(requests, collapse) {
@@ -195,5 +243,5 @@
     return [...buckets.values()].sort((a, b) => (b.latestMillis ?? -Infinity) - (a.latestMillis ?? -Infinity) || a.key.localeCompare(b.key));
   }
 
-  return { defaults, groupTraces, filterRequests, bucketRequests };
+  return { defaults, groupTraces, filterRequests, filterErrorRequests, bucketRequests };
 });

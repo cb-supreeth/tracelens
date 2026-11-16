@@ -12,7 +12,7 @@ public final class ExternalCallAdvice {
     private ExternalCallAdvice() {
     }
 
-    @Advice.OnMethodEnter
+    @Advice.OnMethodEnter(suppress = Throwable.class)
     public static void enter(@Advice.Origin("#t") String type, @Advice.Origin("#m") String method) {
         TraceRuntime.onExternalCall(type.substring(type.lastIndexOf('.') + 1), method);
     }

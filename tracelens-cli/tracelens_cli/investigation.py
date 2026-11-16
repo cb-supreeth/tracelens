@@ -25,7 +25,7 @@ MAX_NODES = 40
 MAX_FAILURES = 20
 MAX_MODEL_BYTES = 48 * 1024
 _TRACE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
-_OUTCOMES = frozenset(("all", "error", "success", "active", "unknown"))
+_OUTCOMES = frozenset(("all", "error", "success", "skipped", "active", "unknown"))
 _NOTE = ("Live retained observations only, not all traffic or proof of non-execution. "
          "Failure signals are not root-cause findings. Durations are local elapsed time; "
          "cross-service clocks are not assumed synchronized.")
@@ -58,7 +58,7 @@ def _validate(discovery, service, method, path, user, label, since_minutes, outc
             or not 0 <= since_minutes <= 525600 or not math.isfinite(since_minutes)):
         raise ValueError("since_minutes must be a finite number between 0 and 525600")
     if not isinstance(outcome, str) or outcome not in _OUTCOMES:
-        raise ValueError("outcome must be all, error, success, active or unknown")
+        raise ValueError("outcome must be all, error, success, skipped, active or unknown")
     if selection not in ("unique", "latest"):
         raise ValueError("selection must be unique or latest")
     filters.update(since_minutes=since_minutes, outcome=outcome, selection=selection, trace_id=trace_id)
@@ -149,6 +149,8 @@ def _failure_evidence(request, journey, warnings):
             signals.append("async_timeout")
         if segment["status"] in ("FAILED", "ERROR"):
             signals.append("failed_execution_status")
+        if segment["channel"] == "SCHEDULER" and segment["jobOutcome"] == "FAILED":
+            signals.append("failed_job_outcome")
         if segment["hasErrors"] and not signals:
             signals.append("summary_error_flag")
         if segment["hasExceptions"]:

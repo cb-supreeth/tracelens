@@ -7,7 +7,7 @@ set -eu
 
 CB_EMS_DIR="${CB_EMS_DIR:-$HOME/work/cb-ems}"
 AGENT_JAR="${1:-$HOME/work/cb-tracelens/tracelens-agent/build/libs/tracelens-agent-0.1.1-SNAPSHOT-agent.jar}"
-CONFIG="${2:-$HOME/work/cb-tracelens/scripts/cb-ems-tracelens.json}"
+CONFIG="${2:-$HOME/work/cb-tracelens/scripts/cb-ems/tracelens.json}"
 # The current EMS application requires Java 21; the agent itself also supports Java 8.
 JAVA_BIN="/Library/Java/JavaVirtualMachines/amazon-corretto-21.jdk/Contents/Home/bin/java"
 JAR="$(ls "$CB_EMS_DIR"/build/libs/cb-ems-app-*.jar 2>/dev/null | grep -v -- '-plain' | head -1)"

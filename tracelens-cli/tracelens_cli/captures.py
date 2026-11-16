@@ -26,7 +26,7 @@ import urllib.request
 import uuid
 
 from .client import DebugApiError, TraceLensClient
-from .dependencies import boundary_summary, destination
+from .dependencies import boundary_summary, destination, without_sql
 from .execution import build_segment_execution
 
 
@@ -274,7 +274,7 @@ def _project_segment(service, row, remaining_events):
                 warnings.add("dependency_identity_limit")
     # Reuse the existing conservative reconstruction, then discard names of
     # threads, raw messages, arbitrary node text and all runtime identity fields.
-    model = build_segment_execution({"events": events, "eventCount": len(events)}, max_nodes=500)
+    model = build_segment_execution(without_sql({"events": events, "eventCount": len(events)}), max_nodes=500)
     warnings.update("nesting_" + item["code"] for item in model["warnings"])
     nodes = {node["id"]: node for node in model["nodes"] if node["kind"] == "invocation"}
     nesting = Counter()

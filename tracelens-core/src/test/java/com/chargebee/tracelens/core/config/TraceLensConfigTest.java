@@ -36,6 +36,7 @@ class TraceLensConfigTest {
                   "capturePayloads": true,
                   "maxTrackedEvents": 12345,
                   "maxTrackedRequests": 7,
+                  "httpRetentionPercent": 60,
                   "idleTtlMinutes": 5,
                   "evictOnExport": false,
                   "trackMethods": false,
@@ -55,6 +56,7 @@ class TraceLensConfigTest {
         assertThat(loaded.isCapturePayloads()).isTrue();
         assertThat(loaded.getMaxTrackedEvents()).isEqualTo(12345);
         assertThat(loaded.getMaxTrackedRequests()).isEqualTo(7);
+        assertThat(loaded.getHttpRetentionPercent()).isEqualTo(60);
         assertThat(loaded.getIdleTtlMinutes()).isEqualTo(5);
         assertThat(loaded.isEvictOnExport()).isFalse();
         assertThat(loaded.isTrackMethods()).isFalse();
@@ -76,6 +78,7 @@ class TraceLensConfigTest {
         assertThat(loaded.isCapturePayloads()).isFalse();
         assertThat(loaded.getMaxTrackedEvents()).isEqualTo(500_000);
         assertThat(loaded.getMaxTrackedRequests()).isEqualTo(200);
+        assertThat(loaded.getHttpRetentionPercent()).isEqualTo(75);
         assertThat(loaded.getIdleTtlMinutes()).isEqualTo(60);
         assertThat(loaded.isEvictOnExport()).isTrue();
         assertThat(loaded.isTrackMethods()).isTrue();
@@ -87,6 +90,15 @@ class TraceLensConfigTest {
     void rejectsMissingApplicationId() {
         TraceLensConfig config = new TraceLensConfig().setPackages(List.of("com.chargebee.ems"));
         assertThat(config.validate()).anyMatch(e -> e.contains("applicationId"));
+    }
+
+    @Test
+    void validatesHttpReservationAndAllowsLegacyOptOut() {
+        TraceLensConfig config = new TraceLensConfig().setApplicationId("cb-ems").setPackages(List.of("a.b"));
+        assertThat(config.setHttpRetentionPercent(0).validate()).isEmpty();
+        assertThat(config.setHttpRetentionPercent(99).validate()).isEmpty();
+        assertThat(config.setHttpRetentionPercent(-1).validate()).anyMatch(e -> e.contains("httpRetentionPercent"));
+        assertThat(config.setHttpRetentionPercent(100).validate()).anyMatch(e -> e.contains("httpRetentionPercent"));
     }
 
     @Test

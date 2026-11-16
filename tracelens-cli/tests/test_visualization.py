@@ -4,9 +4,9 @@ import re
 
 import pytest
 
-from tracelens_cli.services import join_trace
+from tracelens_cli.services import Federation, Service, join_trace
 from tracelens_cli.visualization import (
-    MAX_CALLS, MAX_EDGES, MAX_ERRORS, MAX_LABEL, MAX_SEGMENTS, MAX_WARNINGS,
+    MAX_CALLS, MAX_DEPENDENCIES, MAX_EDGES, MAX_ERRORS, MAX_LABEL, MAX_SEGMENTS, MAX_WARNINGS,
     build_visualization, to_mermaid,
 )
 
@@ -38,8 +38,54 @@ def by_kind(model, kind):
     return [node for node in model["nodes"] if node["kind"] == kind]
 
 
+def test_http_order_timing_is_caller_local_and_never_creates_links():
+    doc = journey()
+    doc["links"] = []
+    doc["httpCalls"][0].update(startedAt="1793018824000", timingBoundary="caller-local")
+    before = copy.deepcopy(doc)
+    node = by_kind(build_visualization(doc), "http-call")[0]
+    assert node["startedAtMillis"] == 1793018824000
+    assert node["durationMs"] == 9.123456
+    assert node["timingBoundary"] == "caller-local"
+    assert node["downstreamState"] == "not-observed"
+    assert doc == before
+    doc["httpCalls"][0]["startedAtMillis"] = 100
+    assert by_kind(build_visualization(doc), "http-call")[0]["startedAtMillis"] == 100
+
+
+@pytest.mark.parametrize("bad", [None, True, {}, [], -1, 1.5, "NaN", float("inf"), "bad", 9007199254740992])
+def test_invalid_http_order_timing_is_omitted(bad):
+    doc = journey()
+    doc["httpCalls"][0].update(startedAt=bad, timingBoundary={"secret": "value"})
+    node = by_kind(build_visualization(doc), "http-call")[0]
+    assert "startedAtMillis" not in node
+    assert "timingBoundary" not in node
+
+
 def warnings(model):
     return "\n".join(model["warnings"])
+
+
+@pytest.mark.parametrize("counts", [(96, 9, 47, 17), (480, 8, 12, 12)])
+def test_app_heavy_multiservice_dependencies_remain_visible_up_to_512(counts):
+    services = ("cb-app", "cb-ems", "cb-consumption-ledger", "cb-grant-orchestrator")
+    doc = {"segments": [segment(service) for service in services], "externalCalls": [
+        {"callKey": f"{service}:dependency:{index}", "ownerSegmentKey": service,
+         "service": service, "eventSeq": index + 1, "boundaryKind": "database", "system": "mysql",
+         "direction": "outbound", "evidenceKind": "client-boundary", "operation": "executeQuery", "status": "OBSERVED"}
+        for service, count in zip(services, counts) for index in range(count)
+    ]}
+    before = copy.deepcopy(doc)
+    graph = build_visualization(doc)
+    dependencies = by_kind(graph, "dependency-call")
+    assert MAX_DEPENDENCIES == 512
+    assert {service: sum(node["service"] == service for node in dependencies) for service in services} == dict(zip(services, counts))
+    assert all(node["ownerId"] and node["downstreamState"] == "not-observed" for node in dependencies)
+    assert len(graph["edges"]) == sum(counts)
+    assert "limit reached" not in warnings(graph)
+    assert doc == before
+    doc["externalCalls"].reverse()
+    assert build_visualization(doc) == graph
 
 
 def test_join_trace_input_schema_and_local_durations():
@@ -67,6 +113,88 @@ def test_join_trace_input_schema_and_local_durations():
     assert model["note"].startswith("Observed evidence only;")
     assert "live" not in model["note"].lower()
     assert "absence does not prove a service was not called" in model["note"]
+
+
+def test_scheduler_graph_retains_only_selected_job_metadata_from_raw_attributes():
+    attrs = {"jobType": "compute_billing_metrics", "jobId": "42", "jobOutcome": "FAILED",
+             "jobAuditStatus": "RESCHEDULE_FAILED", "jobFailureType": "java.lang.IllegalStateException",
+             "scheduler": "chargebee", "payload": "SECRET_JOB_PAYLOAD"}
+    doc = {"segments": [segment(entryChannel="SCHEDULER", httpMethod="", path="", attributes=attrs)]}
+    model = build_visualization(doc)
+    job = by_kind(model, "segment")[0]
+    for key, value in attrs.items():
+        if key != "payload":
+            assert job[key] == value
+    assert "compute_billing_metrics" in job["label"]
+    assert "SECRET_JOB_PAYLOAD" not in json.dumps(model)
+
+
+def test_federated_scheduler_summary_to_export_to_graph_keeps_all_job_fields():
+    fields = {"jobType": "compute_billing_metrics", "jobId": "42", "jobOutcome": "SKIPPED",
+              "jobAuditStatus": "IGNORED", "jobFailureType": "com.chargebee.app.scheduler.IgnoreJobSignal", "scheduler": "chargebee"}
+    summary = segment(entryChannel="SCHEDULER", httpMethod="", path="", traceId="job-trace", **fields)
+    exported = {key: value for key, value in summary.items() if key not in fields}
+    exported.update(attributes={**fields, "payload": "SECRET_JOB_PAYLOAD"},
+                    events=[{"type": "EXCEPTION", "attributes": {"exceptionType": fields["jobFailureType"]}}])
+    class Client:
+        def traces(self):
+            return {"traces": [copy.deepcopy(summary)]}
+        def find_by_trace_id(self, trace_id):
+            assert trace_id == "job-trace"
+            return self.traces()
+        def export(self, segment_id, evict):
+            assert segment_id == summary["segmentId"] and evict is False
+            return copy.deepcopy(exported)
+    federation = Federation([Service("app", "http://127.0.0.1:1", None)])
+    federation.clients["app"] = Client()
+    assert all(federation.traces()["traces"][0][key] == value for key, value in fields.items())
+    journey = federation.get_distributed_trace("job-trace")
+    assert all(journey["segments"][0]["attributes"][key] == value for key, value in fields.items())
+    model = build_visualization(journey)
+    assert all(by_kind(model, "segment")[0][key] == value for key, value in fields.items())
+    assert "SECRET_JOB_PAYLOAD" not in json.dumps(model)
+    exported["entryChannel"] = "HTTP"
+    assert "jobOutcome" not in by_kind(build_visualization(federation.get_distributed_trace("job-trace")), "segment")[0]
+
+
+def test_database_route_nodes_preserve_captured_threads_and_each_event_identity():
+    events = [
+        {"type": "DB_ROUTE", "seq": seq, "thread": thread, "attributes": {"route": route}}
+        for seq, thread, route in [(147, "emsAsync-353", "TEST_MASTER"),
+                                   (1480, "famAsync-5", "TEST_SLAVE"),
+                                   (1519, "famAsync-5", "TEST_MASTER")]
+    ]
+    doc = join_trace("trace-1", [segment("ems", events=events)], [])
+    original = copy.deepcopy(doc)
+    model = build_visualization(doc)
+    routes = sorted(by_kind(model, "dependency-call"), key=lambda row: row["eventSeq"])
+    assert [(row["eventSeq"], row["thread"], row["destination"]) for row in routes] == [
+        (147, "emsAsync-353", "TEST_MASTER"), (1480, "famAsync-5", "TEST_SLAVE"),
+        (1519, "famAsync-5", "TEST_MASTER")]
+    assert len({row["id"] for row in routes}) == len({row["callKey"] for row in routes}) == 3
+    assert all(row["boundaryKind"] == "database-route" and row["evidenceKind"] == "routing-marker"
+               and row["segmentId"] == "ems-segment" and row["durationMs"] is None for row in routes)
+    assert all(value is None or isinstance(value, (str, int, float, bool)) for row in routes for value in row.values())
+    assert len(model["edges"]) == 3, "canonical evidence retains each recorded decision, not destination grouping"
+    assert doc == original
+
+
+@pytest.mark.parametrize("thread", [None, "", 123, True, {"payload": "UNSAFE"}, ["UNSAFE"],
+                                    "worker\nUNSAFE", "worker\u202eUNSAFE", "w" * 129])
+def test_dependency_threads_are_allowlisted_and_missing_legacy_values_are_not_inferred(thread):
+    route = {"callKey": "ems:dependency:0", "ownerSegmentKey": "ems", "boundaryKind": "database-route",
+             "destination": "TEST_MASTER", "eventSeq": 147,
+             "attributes": {"thread": "UNSAFE-attribute-thread"}, "payload": "UNSAFE"}
+    if thread is not None:
+        route["thread"] = thread
+    doc = {"segments": [segment("ems", thread="UNSAFE-owner-thread")], "externalCalls": [route]}
+    original = copy.deepcopy(doc)
+    model = build_visualization(doc)
+    node = by_kind(model, "dependency-call")[0]
+    assert node["thread"] is None
+    assert node["eventSeq"] == 147
+    assert "UNSAFE" not in json.dumps(model)
+    assert doc == original
 
 
 def test_model_is_deterministic_order_independent_and_does_not_mutate():

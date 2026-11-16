@@ -87,6 +87,10 @@ public final class Java8ServletSmoke {
 
     private void enabled() throws Exception {
         require(get("/tracelens/summary").json().path("traceCount").asInt() == 0, "store not initially empty");
+        require(get("/tracelens/summary").json().path("httpIncludePaths").equals(JSON.readTree("[\"/api\"]")),
+                "adapter summary did not report JSON HTTP capture scope");
+        require(get("/tracelens/metadata").json().path("httpIncludePaths").equals(JSON.readTree("[\"/api\"]")),
+                "adapter metadata did not report JSON HTTP capture scope");
         require(get("/tracelens/metadata").json().path("applicationId").asText().equals("cb-app-servlet-smoke"),
                 "metadata/config schema mismatch");
 
@@ -103,6 +107,17 @@ public final class Java8ServletSmoke {
         require(!exported.toString().contains("query-secret") && !exported.toString().contains("auth-secret")
                 && !exported.toString().contains("cookie-secret"), "sensitive request material was exported");
         require(export(firstId).path("segmentId").asText().equals(firstId), "MCP read evicted the trace");
+        JsonNode overview = get("/tracelens/overview/" + firstId).json();
+        require(overview.path("detailsAvailable").asBoolean() && overview.path("segmentId").asText().equals(firstId),
+                "bounded overview missing identity/capability");
+        Response pageResponse = get("/tracelens/events/" + firstId + "?limit=2&maxBytes=4096");
+        require(pageResponse.code == 200 && pageResponse.body.getBytes(StandardCharsets.UTF_8).length <= 4096,
+                "event page did not honor actual UTF-8 byte bound");
+        require(pageResponse.json().path("events").size() <= 2, "event count bound ignored");
+        require(get("/tracelens/events/" + firstId + "?maxBytes=1048577").code == 400, "invalid page budget accepted");
+        require(get("/tracelens/request-data/" + firstId).json().path("segmentId").asText().equals(firstId),
+                "request-data identity missing");
+        require(get("/tracelens/summary").json().path("projectionVersion").asInt() == 1, "projection capabilities missing");
         require(get("/probe").body.equals("GET:12:none"), "servlet thread retained prior trace context");
 
         String payload = "body-secret";

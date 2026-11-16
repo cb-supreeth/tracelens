@@ -119,6 +119,49 @@ def test_search_by_service_method_path_user_and_time(paired):
         federation.traces(service="http://malicious")
 
 
+@pytest.mark.parametrize("metadata,partial,limited", [
+    ({"partial": True}, True, False),
+    ({"limited": True}, False, True),
+    ({"errors": [{"error": "SECRET_UPSTREAM_BODY"}]}, True, False),
+    ({"partial": True, "limited": True}, True, True),
+    ({"partial": False, "limited": False, "errors": []}, False, False),
+])
+def test_summary_incompleteness_survives_merging_and_filtering(metadata, partial, limited):
+    federation = Federation([Service("app", "http://app.invalid"), Service("ems", "http://ems.invalid")])
+    class Client:
+        def __init__(self, rows, extra=None):
+            self.doc = {"traces": rows, **(extra or {})}
+        def traces(self):
+            return copy.deepcopy(self.doc)
+    federation.clients["app"] = Client([segment("app", APP_ID, "1111111111111111")])
+    federation.clients["ems"] = Client([], metadata)
+    for filters, count in [({}, 1), ({"method": "POST"}, 0)]:
+        result = federation.traces(**filters)
+        assert result["partial"] is partial
+        assert result["limited"] is limited
+        assert result["count"] == count
+        assert set(result) == {"traces", "count", "errors", "partial", "limited", "federated"}
+        assert result["errors"] == []  # No arbitrary upstream error body is exposed.
+        assert "SECRET_UPSTREAM_BODY" not in json.dumps(result)
+    # Unqueried services do not contaminate an explicitly selected scope.
+    selected = federation.traces(service="app")
+    assert selected["partial"] is selected["limited"] is False
+
+
+def test_local_summary_truncation_remains_limited_without_claiming_upstream_count():
+    federation = Federation([Service("app", "http://app.invalid")])
+    class Client:
+        def traces(self):
+            return {"traces": [segment("app", APP_ID, "1111111111111111"),
+                               segment("app", EMS_ID, "2222222222222222")],
+                    "count": 1000, "limited": False}
+    federation.clients["app"] = Client()
+    result = federation.traces(limit=1)
+    assert result["limited"] is True
+    assert result["partial"] is False
+    assert result["count"] == len(result["traces"]) == 1
+
+
 def test_offline_service_is_explicit_and_downstream_remains_incomplete(paired):
     federation = paired[0]
     class Offline:

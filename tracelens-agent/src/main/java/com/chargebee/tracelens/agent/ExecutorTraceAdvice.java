@@ -1,39 +1,58 @@
 package com.chargebee.tracelens.agent;
 
-import com.chargebee.tracelens.bridge.TraceContext;
+import com.chargebee.tracelens.bridge.ExecutorTraceRuntime;
 import net.bytebuddy.asm.Advice;
 
-import java.util.concurrent.Callable;
-
-/**
- * Trace propagation across thread pools without OTel: wrap tasks at the terminal
- * hand-off points so the snapshot rides along. Covers every Spring
- * ThreadPoolTaskExecutor (they delegate to a java.util.concurrent pool), ad-hoc
- * pools, and scheduled pools — framework-independent by design.
- *
- *   ThreadPoolExecutor.execute(Runnable)          — submit() funnels here
- *   ScheduledThreadPoolExecutor.schedule*(...)    — its execute()/submit() funnel here
- *
- * No-trace and already-wrapped (TracedTask) tasks pass through unmodified, so pools
- * with no traced work pay one ThreadLocal read per task.
- */
+/** Exact ThreadPoolExecutor support; application task identities never change. */
 public final class ExecutorTraceAdvice {
+    private ExecutorTraceAdvice() { }
 
-    private ExecutorTraceAdvice() {
-    }
+    public static final class Submit {
+        @Advice.OnMethodEnter(suppress = Throwable.class)
+        public static Object enter(@Advice.This Object executor, @Advice.Argument(0) Runnable task) {
+            return ExecutorTraceRuntime.submit(executor, task);
+        }
 
-    public static final class WrapRunnable {
-        @Advice.OnMethodEnter
-        public static void enter(@Advice.Argument(value = 0, readOnly = false) Runnable task) {
-            task = TraceContext.wrap(task);
+        @Advice.OnMethodExit(onThrowable = Throwable.class, suppress = Throwable.class)
+        public static void exit(@Advice.Enter Object token, @Advice.Thrown Throwable failure) {
+            ExecutorTraceRuntime.submitted(token, failure);
         }
     }
 
-    public static final class WrapCallable {
-        @Advice.OnMethodEnter
-        @SuppressWarnings({"rawtypes", "unchecked"})
-        public static void enter(@Advice.Argument(value = 0, readOnly = false) Callable task) {
-            task = TraceContext.wrap(task);
+    public static final class Before {
+        @Advice.OnMethodEnter(suppress = Throwable.class)
+        public static void enter(@Advice.This Object executor, @Advice.Argument(1) Runnable task) {
+            ExecutorTraceRuntime.before(executor, task);
         }
+    }
+
+    public static final class After {
+        @Advice.OnMethodEnter(suppress = Throwable.class)
+        public static void enter(@Advice.This Object executor) { ExecutorTraceRuntime.after(executor); }
+    }
+
+    public static final class Reject {
+        @Advice.OnMethodEnter(suppress = Throwable.class)
+        public static void enter(@Advice.This Object executor, @Advice.Argument(0) Runnable task) {
+            ExecutorTraceRuntime.rejected(executor, task);
+        }
+    }
+
+    public static final class Remove {
+        @Advice.OnMethodExit(suppress = Throwable.class)
+        public static void exit(@Advice.This Object executor, @Advice.Argument(0) Runnable task,
+                                @Advice.Return boolean removed) {
+            ExecutorTraceRuntime.removed(executor, task, removed);
+        }
+    }
+
+    public static final class Purge {
+        @Advice.OnMethodExit(suppress = Throwable.class)
+        public static void exit(@Advice.This Object executor) { ExecutorTraceRuntime.purge(executor, false); }
+    }
+
+    public static final class Stop {
+        @Advice.OnMethodExit(suppress = Throwable.class)
+        public static void exit(@Advice.This Object executor) { ExecutorTraceRuntime.purge(executor, true); }
     }
 }

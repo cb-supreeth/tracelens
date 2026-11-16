@@ -6,6 +6,9 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.security.Principal;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -13,12 +16,26 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * HTTP boundary shared by javax and jakarta containers. No servlet API may be
  * linked from this bootstrap class: servlet types belong to application loaders.
- * Request bodies, queries, cookies and authorization headers are never inspected.
+ * Payload capture is separately opt-in, bounded and sanitized by the listener.
+ * Bodies are observed only as the application consumes them; never eagerly read.
  */
 public final class HttpTraceRuntime {
     public interface Listener {
         /** Opt-in; older adapters keep their original local-only behavior. */
         default boolean distributedTracingEnabled() { return false; }
+
+        /** Snapshotted at registration; empty declines all HTTP entry capture. */
+        default List<String> httpIncludePaths() { return Collections.singletonList("/"); }
+
+        default boolean captureHttpQueryParameters() { return false; }
+        default boolean captureHttpRequestBodies() { return false; }
+        /** Retention admission for opted-in request data, independent of method/line capture. */
+        default boolean captureHttpDetails(String segmentId) { return true; }
+        default int maxHttpPayloadLength() { return 4096; }
+        /** Implementation must return only sanitized attributes, never raw invalid input. */
+        default Map<String, String> sanitizeHttpPayload(String input, String format, boolean query) {
+            return Collections.emptyMap();
+        }
 
         /** Register a trace, without activating thread-local context. Null declines capture. */
         TraceSnapshot begin(String label, String user, Map<String, String> attributes);
@@ -29,7 +46,7 @@ public final class HttpTraceRuntime {
 
     private static final String STATE_KEY = HttpTraceRuntime.class.getName() + ".state";
     private static final AtomicLong CAPTURED = new AtomicLong();
-    private static volatile Listener listener;
+    private static volatile Registration registration;
     private static final Class<?>[] NO_TYPES = new Class<?>[0];
     private static final Class<?>[] ONE_STRING = {String.class};
     private static final Class<?>[] TWO_STRINGS = {String.class, String.class};
@@ -43,11 +60,26 @@ public final class HttpTraceRuntime {
 
     private HttpTraceRuntime() { }
 
-    public static synchronized void registerListener(Listener value) { listener = value; }
-    public static synchronized void unregisterListener(Listener expected) {
-        if (listener == expected) listener = null;
+    private static final class Registration {
+        final Listener listener;
+        final String[] prefixes;
+        Registration(Listener value) {
+            listener = value;
+            List<String> paths = value.httpIncludePaths(), normalized = new ArrayList<>();
+            if (paths != null) for (String prefix : paths) {
+                if (prefix == null || !prefix.startsWith("/")) continue;
+                while (prefix.length() > 1 && prefix.endsWith("/")) prefix = prefix.substring(0, prefix.length() - 1);
+                normalized.add(prefix);
+            }
+            prefixes = normalized.toArray(new String[0]);
+        }
     }
-    public static boolean hasListener() { return listener != null; }
+
+    public static synchronized void registerListener(Listener value) { registration = value == null ? null : new Registration(value); }
+    public static synchronized void unregisterListener(Listener expected) {
+        if (registration != null && registration.listener == expected) registration = null;
+    }
+    public static boolean hasListener() { return registration != null; }
     public static long capturedRequests() { return CAPTURED.get(); }
 
     /** Enrich an existing request after authentication; never creates a new trace. */
@@ -106,8 +138,9 @@ public final class HttpTraceRuntime {
 
     /** Return an opaque dispatch scope. Advice calls exit on the SAME thread. */
     public static Object enter(Object request, Object response) {
-        Listener currentListener = listener;
-        if (currentListener == null || request == null || response == null) return null;
+        Registration current = registration;
+        if (current == null || request == null || response == null) return null;
+        Listener currentListener = current.listener;
         State state = null;
         try {
             Object saved = call(request, "getAttribute", ONE_STRING, STATE_KEY);
@@ -122,7 +155,7 @@ public final class HttpTraceRuntime {
                 String context = text(call(request, "getContextPath", NO_TYPES));
                 String path = context != null && !context.isEmpty() && uri.startsWith(context)
                         ? uri.substring(context.length()) : uri;
-                boolean skipped = !included(path) || ignored(path);
+                boolean skipped = !included(path, current.prefixes) || ignored(path);
                 if (skipped && !currentListener.distributedTracingEnabled()) return null;
                 String label = header(request, TraceSnapshot.LENS_ID_KEY);
                 String user = header(request, TraceSnapshot.USER_KEY);
@@ -163,6 +196,25 @@ public final class HttpTraceRuntime {
                 TraceSnapshot snapshot = currentListener.begin(label, user, attributes);
                 if (snapshot == null) return null;
                 state = new State(currentListener, snapshot, request, response, user, explicitUser);
+                boolean payloadAdmitted = !skipped && !snapshot.getAttributes().containsKey("captureSkipped");
+                if (payloadAdmitted && !currentListener.captureHttpDetails(snapshot.getSegmentId())) {
+                    payloadAdmitted = false;
+                    state.payloadAttributes.put("httpQueryParametersStatus", "omitted-not-retained");
+                    state.payloadAttributes.put("httpRequestBodyStatus", "omitted-not-retained");
+                }
+                // Retention admission precedes payload inspection. Sanitized output is
+                // persisted only on completion, never copied into async TraceSnapshots.
+                if (payloadAdmitted && currentListener.captureHttpQueryParameters()) {
+                    String query = text(call(request, "getQueryString", NO_TYPES));
+                    state.payloadAttributes.putAll(currentListener.sanitizeHttpPayload(query == null ? "" : query, "form", true));
+                }
+                if (payloadAdmitted && currentListener.captureHttpRequestBodies()) {
+                    state.body = new HttpRequestBodyCapture(currentListener,
+                            text(call(request, "getContentType", NO_TYPES)),
+                            text(call(request, "getCharacterEncoding", NO_TYPES)),
+                            text(call(request, "getHeader", ONE_STRING, "Content-Encoding")),
+                            length instanceof Number ? ((Number) length).longValue() : -1, isTomcatRequest(request), snapshot.getSegmentId());
+                }
                 // setAttribute is mandatory: nesting and redispatch must find the same state.
                 invoke(request, "setAttribute", ATTRIBUTE_TYPES, STATE_KEY, state);
                 CAPTURED.incrementAndGet();
@@ -226,6 +278,28 @@ public final class HttpTraceRuntime {
         }
     }
 
+    /** Called on Tomcat's existing accessor entry, without invoking it ourselves. */
+    public static void bindRequestBody(Object request, Object inputBuffer) {
+        if (registration == null || inputBuffer == null) return;
+        try {
+            Object saved = call(request, "getAttribute", ONE_STRING, STATE_KEY);
+            if (!(saved instanceof State)) return;
+            State state = (State) saved;
+            synchronized (state) {
+                if (!state.completed && state.body != null) state.body.bind(inputBuffer,
+                        text(call(request, "getCharacterEncoding", NO_TYPES)));
+            }
+        } catch (Throwable ignored) { /* Optional observation never changes servlet behavior. */ }
+    }
+
+    private static boolean isTomcatRequest(Object request) {
+        for (Class<?> type = request.getClass(); type != null; type = type.getSuperclass()) {
+            if (type.getName().equals("org.apache.catalina.connector.Request")
+                    || type.getName().equals("org.apache.catalina.connector.RequestFacade")) return true;
+        }
+        return false;
+    }
+
     private static String combinedTracestate(Object request) {
         Object headers = call(request, "getHeaders", ONE_STRING, "tracestate");
         if (!(headers instanceof java.util.Enumeration)) {
@@ -273,6 +347,8 @@ public final class HttpTraceRuntime {
         String failureType;
         boolean escapingFailure;
         boolean timedOut;
+        HttpRequestBodyCapture body;
+        final Map<String, String> payloadAttributes = new LinkedHashMap<>();
 
         State(Listener owner, TraceSnapshot snapshot, Object request, Object response, String user,
               boolean explicitUser) {
@@ -363,17 +439,17 @@ public final class HttpTraceRuntime {
                 Object route = call(request, "getAttribute", ONE_STRING,
                         "org.springframework.web.servlet.HandlerMapping.bestMatchingPattern");
                 if (route != null) put(attributes, "route", safe(route.toString()));
+                attributes.putAll(payloadAttributes);
+                payloadAttributes.clear();
+                if (body != null) attributes.putAll(body.finish());
             }
             try { owner.complete(snapshot.getSegmentId(), attributes); }
             catch (Throwable ignored) { /* tracing must never break the request */ }
         }
     }
 
-    private static boolean included(String path) {
-        String prefixes = System.getProperty("tracelens.http.includePaths", "/");
-        for (String prefix : prefixes.split(",")) {
-            prefix = prefix.trim();
-            while (prefix.length() > 1 && prefix.endsWith("/")) prefix = prefix.substring(0, prefix.length() - 1);
+    private static boolean included(String path, String[] prefixes) {
+        for (String prefix : prefixes) {
             if ("/".equals(prefix) || path.equals(prefix) || path.startsWith(prefix + "/")) return true;
         }
         return false;

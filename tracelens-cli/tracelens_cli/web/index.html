@@ -5,56 +5,112 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TraceLens</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/evidence-copy.css">
   <link rel="stylesheet" href="/static/trace-graph.css">
+  <link rel="stylesheet" href="/static/execution-graph.css">
+  <link rel="stylesheet" href="/static/code-flow.css">
+  <link rel="stylesheet" href="/static/help.css">
+  <link rel="stylesheet" href="/static/guided-investigation.css">
+  <link rel="stylesheet" href="/static/capture-tools.css">
+  <link rel="stylesheet" href="/static/context-help.css">
+  <link rel="stylesheet" href="/static/performance.css">
+  <link rel="stylesheet" href="/static/request-insights.css">
 </head>
 <body>
   <header>
-    <div class="brand">Trace<span>Lens</span></div>
-    <div id="status" class="status">connecting…</div>
+    <button id="home" type="button" class="brand" aria-label="TraceLens home — Live requests" title="Go to Live requests">Trace<span>Lens</span></button>
+    <details id="connection-menu" class="connection-menu"><summary id="connection-summary">Connecting…</summary><div id="status" class="status" aria-label="Service recording status">connecting…</div><p id="connection-detail">Connection health is separate from request outcomes and saved capture completeness.</p></details>
     <div class="spacer"></div>
-    <label class="autorefresh"><input id="autorefresh" type="checkbox" checked> live</label>
+    <button id="help-open" type="button" aria-haspopup="dialog" aria-controls="help-dialog">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.3 2.3 0 0 1 4.6 0c0 1.7-2.3 2-2.3 3.5M12 16h.01"/></svg>
+      <span>What is TraceLens</span>
+    </button>
+    <label class="autorefresh" title="Poll retained requests every 3 seconds; this does not enable service recording"><input id="autorefresh" type="checkbox" checked> Auto-refresh</label>
     <button id="refresh">Refresh</button>
-    <button id="reset" title="clear all retained traces">reset</button>
+    <button id="reset" disabled title="Waiting for service status">Clear traces</button>
   </header>
 
   <main>
+    <nav id="workspace-navigation" class="workspace-navigation" aria-label="Workspace">
+      <button id="requests-workspace" type="button" aria-pressed="true">Requests</button>
+      <span class="context-help-host"><button id="pins-tab" aria-pressed="false" data-help="saved-captures">Saved captures <span id="pin-count">0</span></button></span>
+      <span class="context-help-host"><button id="performance-tab" aria-pressed="false" data-help="performance-insights">Performance</button></span>
+      <button id="services-workspace" type="button" aria-pressed="false">Services &amp; capture settings</button>
+    </nav>
+    <div id="comparison-return" class="comparison-return hidden"><button id="back-to-comparison" type="button">← Back to comparison</button><span id="comparison-context"></span></div>
     <div id="notice" class="notice hidden" role="status"></div>
+    <section id="services-view" class="hidden" aria-labelledby="services-title">
+      <h1 id="services-title">Services &amp; capture settings</h1>
+      <p>Check current connections, or reopen the local configuration dashboard.</p>
+      <div id="services-status" class="services-status" aria-live="polite"></div>
+      <section class="settings-entry"><h2>Change what is captured</h2>
+        <p>In Terminal, open the folder containing your TraceLens bundle and run:</p><pre><code>./setup.sh</code></pre>
+        <p>Choose <strong>Edit capture settings</strong>, enter your TraceLens installation directory, then <strong>Load services</strong>. Choose <strong>Edit capture settings</strong> on the intended service and review changes before saving.</p>
+        <p class="settings-note">The local dashboard expires after 15 minutes. Run the same script again to reopen it. Saving settings does not prove they are running; restart only after reviewing and confirming the service action.</p>
+      </section>
+      <p class="settings-note">Connection health does not prove capture readiness. Return to Requests → Start an investigation to check a specific API.</p>
+    </section>
     <section id="list-view">
-      <div class="request-heading"><div><h1>Requests</h1><p>Find an API call, then follow its work across services.</p></div>
-        <div class="list-tabs" aria-label="Request source"><button id="live-tab" aria-pressed="true">Live requests</button><button id="errors-tab" aria-pressed="false">Errors</button><button id="pins-tab" aria-pressed="false">Pinned captures <span id="pin-count">0</span></button></div>
+      <div class="request-heading"><div><h1 id="list-title">Requests</h1><p id="list-description">Find an API call, then follow its work across services.</p></div>
+        <div id="request-source-tabs" class="list-tabs request-tabs" aria-label="Request source">
+          <span class="context-help-host"><button id="live-tab" aria-pressed="true" data-help="live-requests">Live requests <span id="live-count">0</span></button></span>
+          <span class="context-help-host"><button id="jobs-tab" aria-pressed="false" data-help="scheduled-jobs">Scheduled jobs <span id="jobs-count">0</span></button></span>
+      <span class="context-help-host"><button id="errors-tab" aria-pressed="false" data-help="errors">Errors <span id="errors-count">0</span></button></span>
+        </div>
       </div>
+      <div id="workflow-tools" class="workflow-tools">
+        <div id="investigation-workflow" class="workflow-tool context-help-host"><details id="investigation-panel"><summary data-help="investigation">Start an investigation</summary><div id="guided-investigation"></div></details></div>
+        <div id="capture-workflow" class="workflow-tool context-help-host hidden"><details id="capture-tools-panel"><summary data-help="capture-tools">Compare &amp; search saved captures</summary><div id="capture-tools"></div></details></div>
+      </div>
+      <div id="compare-selection" class="compare-selection hidden"><span id="compare-selection-count" role="status">Select two viewer captures, Before first.</span><button id="compare-selected" type="button" disabled>Compare selected</button><button id="clear-comparison-selection" type="button">Clear selection</button></div>
       <div id="live-controls">
-        <div class="saved-views"><label>Saved view <select id="saved-view"><option value="">Choose a view…</option></select></label><button id="save-view">Save current view</button><button id="delete-view" disabled>Delete view</button><button id="clear-filters">Reset filters</button></div>
-        <div class="filters">
-          <label>API path<input id="path-filter" type="search" placeholder="/api/v2/subscriptions"></label>
+        <div class="filters primary-filters">
+          <div id="primary-query-slot"><label id="path-filter-control">API path<input id="path-filter" type="search" placeholder="Find an API, e.g. /features…"></label></div>
+          <div id="request-keyword-control" class="request-keyword-control">
+            <label for="request-keyword">Request data keyword</label>
+            <div class="request-keyword-input"><input id="request-keyword" type="search" maxlength="256" placeholder="Param name or value…" aria-describedby="request-keyword-help" autocomplete="off"><button id="request-keyword-search" type="button">Search</button></div>
+            <span id="request-keyword-help" class="sr-only">Search captured API query parameters and request bodies, including downstream services. Press Enter or Search. Other filters narrow the requests searched.</span>
+          </div>
+          <label>Time window<select id="time-filter"><option value="5">Last 5 minutes</option><option value="30" selected>Last 30 minutes</option><option value="60">Last hour</option><option value="1440">Last 24 hours</option><option value="">All retained</option></select></label>
+          <label><span id="service-filter-label">Observed service</span><select id="service-filter"><option value="">All services</option></select></label>
+          <label id="outcome-filter-control">Outcome<select id="outcome-filter"><option value="">All outcomes</option><option value="error">Errors in any segment</option><option value="success">Successful HTTP</option><option value="active">Active</option><option value="unknown">Unknown</option></select></label>
+          <button id="more-filters-toggle" type="button" aria-expanded="false" aria-controls="advanced-filters">More filters</button>
+        </div>
+        <div id="request-keyword-status" class="request-keyword-status hidden" role="status" aria-live="polite"></div>
+        <div id="advanced-filters" class="filters advanced-filters hidden">
+          <div id="advanced-query-slot"><label id="query-filter-control"><span id="query-filter-label">Trace ID or label</span><input id="filter" type="search" placeholder="Trace ID, segment ID, or reproduction label"></label></div>
           <label>User<input id="user-filter" type="search" placeholder="Email or API identity"></label>
           <label>Site ID<input id="site-filter" type="search" placeholder="Exact site ID"></label>
-          <label><span id="service-filter-label">Service</span><select id="service-filter"><option value="">All services</option></select></label>
-          <label>Method<select id="method-filter"><option value="">All methods</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select></label>
-          <label>Channel<select id="channel-filter"><option value="HTTP">HTTP requests</option><option value="">All channels</option><option value="SCHEDULER">Scheduled jobs</option><option value="SQS">Queue messages</option><option value="OTHER">Other</option></select></label>
-          <label>Time window<select id="time-filter"><option value="5">Last 5 minutes</option><option value="30" selected>Last 30 minutes</option><option value="60">Last hour</option><option value="1440">Last 24 hours</option><option value="">All retained</option></select></label>
-          <label id="outcome-filter-control">Outcome<select id="outcome-filter"><option value="">All outcomes</option><option value="error">Errors in any segment</option><option value="success">Successful HTTP</option><option value="active">Active</option><option value="unknown">Unknown</option></select></label>
+          <label id="method-filter-control">Method<select id="method-filter"><option value="">All methods</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select></label>
+          <label id="channel-filter-control">Channel<select id="channel-filter"><option value="HTTP">HTTP requests</option><option value="">All request channels</option><option value="SQS">Queue messages</option><option value="OTHER">Other</option></select></label>
           <label>Min duration (ms)<input id="min-duration" type="number" min="0" step="any" placeholder="0"></label>
           <label>Max duration (ms)<input id="max-duration" type="number" min="0" step="any" placeholder="Any"></label>
-          <label class="wide-filter">Trace ID or label<input id="filter" type="search" placeholder="Trace ID, segment ID, or reproduction label"></label>
         </div>
         <div id="error-controls" class="filters error-filters hidden">
           <label>Error category<select id="error-category"><option value="">All categories</option><option value="http4xx">HTTP 4xx</option><option value="http5xx">HTTP 5xx</option><option value="timeout">Timeout</option><option value="execution">Execution failure</option></select></label>
           <label>Exact HTTP status<input id="error-http-status" type="number" min="100" max="599" step="1" placeholder="Any status"></label>
           <label>Boundary exception class<input id="error-exception-class" type="search" placeholder="java.lang.IllegalStateException"></label>
         </div>
-        <div class="list-options"><label id="collapse-apis-control"><input id="collapse-apis" type="checkbox" checked> Collapse repeated APIs</label><span id="list-filter-help">Filters select requests; they do not change agent recording. Duration is the root service’s local duration.</span></div>
+        <div id="active-filters" class="active-filters hidden" aria-label="Active filters"></div>
+        <div class="list-options">
+          <label id="collapse-apis-control"><input id="collapse-apis" type="checkbox" checked> <span id="collapse-apis-label">Group repeated APIs</span></label>
+          <details id="saved-view-controls"><summary>Saved views</summary><div class="saved-views"><label>Saved view <select id="saved-view"><option value="">Choose a view…</option></select></label><button id="save-view">Save current view</button><button id="delete-view" disabled>Delete view</button></div></details>
+          <button id="clear-filters" class="quiet-button">Reset filters</button>
+        </div>
       </div>
       <p id="error-help" class="error-help hidden">Retained failure evidence, not an error rate. Service, API path, method and channel match the same failing segment; user and site match the request. Signature groups may overlap. A successful root response does not establish recovery from other observed failures.</p>
-      <p id="pin-help" class="hidden">Pinned snapshots are saved only in this browser on this viewer address, including captured source lines. They are not a shared archive or available through MCP. Clearing browser data removes them.</p>
+      <p id="pin-help" class="hidden">Snapshots are saved on this viewer's machine; their links survive service restarts. Updated agents save large captures in bounded chunks, with a downloadable ZIP archive. Storage limits and omitted details are reported explicitly; nothing is silently evicted. Older browser-only pins remain here: choose Save to viewer to preserve one as a file. These links are local, not public share links.</p>
+      <div id="snapshot-import-controls" class="hidden"><label>Import capture archive <input id="snapshot-import" type="file" accept=".zip,application/zip"></label><small>TraceLens ZIP only, up to 66 MiB including archive overhead. Imports create a new saved capture without contacting services. Archives may contain sensitive captured data.</small></div>
       <div id="list-message" role="status" class="notice hidden"></div>
+      <section id="performance-insights" class="hidden" aria-label="Performance insights"></section>
       <div id="error-state" class="error-state hidden" role="status" aria-live="polite"></div>
-      <p id="results-summary" aria-live="polite"></p>
-      <div class="table-scroll">
+      <div id="pending-updates" class="pending-updates hidden" role="status"><span id="pending-update-message"></span><button id="apply-updates">Show latest requests</button></div>
+      <div id="results-heading" class="results-heading"><p id="results-summary" aria-live="polite"></p><details id="retention-details"><summary id="retention-label">Capture info</summary><p id="retention-summary"></p><p id="list-filter-help">Filters select requests; they do not change agent recording. Duration is the root service’s local duration.</p></details></div>
+      <div id="request-table" class="table-scroll">
       <table id="traces">
         <thead>
           <tr>
-            <th>Request</th><th>Services</th><th>User / site</th><th>Outcome</th><th>Duration</th><th>Started</th><th>Actions</th>
+            <th id="request-column-header">Request</th><th>Observed services</th><th id="identity-column-header">User / site</th><th>Outcome</th><th>Duration</th><th>Started</th><th id="actions-column-header" class="hidden">Actions</th>
           </tr>
         </thead>
         <tbody id="trace-rows"></tbody>
@@ -66,44 +122,197 @@
     </section>
 
     <section id="journey-view" class="hidden">
-      <p class="snapshot-banner hidden"></p>
-      <div class="detail-head"><button id="journey-back">← requests</button><div id="journey-meta"></div></div>
-      <div class="journey-toolbar">
-        <div class="list-tabs" aria-label="Request presentation">
-          <button id="journey-diagram-tab" aria-pressed="true">Flow diagram</button>
-          <button id="journey-details-tab" aria-pressed="false">Service details</button>
+      <div class="snapshot-banner hidden"></div>
+      <div class="journey-header">
+        <button id="journey-back" class="journey-back">← Requests</button>
+        <div class="journey-heading-row">
+          <div class="journey-heading-main">
+            <div id="journey-identity" class="request-identity"></div>
+            <div id="journey-meta"></div>
+          </div>
+          <div class="journey-actions" aria-label="Request actions">
+            <button id="journey-save">Save snapshot</button>
+            <details id="journey-share" class="journey-share">
+              <summary id="journey-share-toggle">Share / export</summary>
+              <div class="journey-share-options">
+                <button id="journey-copy-link" title="Works while the live trace is retained">Copy request link</button>
+                <button id="journey-download">Download graph JSON</button>
+              </div>
+            </details>
+          </div>
         </div>
-        <div class="journey-actions">
-          <button id="journey-copy-link" title="Works while the live trace is retained">Copy request link</button>
-          <button id="journey-download">Download graph JSON</button>
+        <div id="journey-insights" hidden></div>
+        <div class="journey-toolbar">
+        <div class="list-tabs" aria-label="Request presentation">
+          <span class="context-help-host"><button id="journey-diagram-tab" aria-pressed="true" data-help="request-flow">Flow diagram</button></span>
+          <span class="context-help-host"><button id="journey-details-tab" aria-pressed="false" data-help="service-details">Service details</button></span>
+        </div>
         </div>
       </div>
-      <p class="causal-note">Observed call relationships, not a shared time axis. Durations are local and must not be added across services.</p>
-      <div id="journey-warnings" class="notice"></div>
       <div id="journey-graph" aria-label="Observed request flow"></div>
       <div id="journey-tree"></div>
     </section>
 
     <section id="detail-view" class="hidden">
-      <p class="snapshot-banner hidden"></p>
-      <div class="detail-head">
+      <div class="snapshot-banner hidden"></div>
+      <nav id="segment-navigation" class="segment-navigation" aria-label="Back to request">
         <button id="back">← back</button>
-        <button id="view-journey">cross-service trace</button>
+        <button id="view-journey" class="hidden" disabled>Open request flow</button>
+      </nav>
+      <div class="segment-heading">
+        <div id="trace-identity" class="request-identity"></div>
+        <div class="segment-service-context" title="Service whose execution is displayed">
+          <strong id="segment-service-name">Unknown service</strong>
+        </div>
+      </div>
+      <div class="detail-head">
         <div id="trace-meta"></div>
       </div>
       <section id="dependency-summary" class="dependency-summary" aria-label="Observed external boundaries"></section>
-      <label class="timeline-filter">Timeline view
-        <select id="timeline-mode"><option value="all">All execution events</option><option value="boundaries">External boundaries and exceptions only</option></select>
-      </label>
+      <div id="segment-toolbar" class="segment-toolbar" role="region" aria-label="Segment navigation and view controls">
+        <button id="segment-back" hidden>← back</button>
+        <div id="segment-toolbar-service" class="segment-service-context" title="Service whose execution is displayed" aria-live="polite" aria-atomic="true">Unknown service</div>
+        <div class="list-tabs execution-tabs" aria-label="Segment presentation">
+          <span class="context-help-host"><button id="execution-flow-tab" aria-pressed="true" aria-controls="execution-graph" data-help="code-flow">Code flow</button></span>
+          <span class="context-help-host"><button id="execution-tree-tab" aria-pressed="false" aria-controls="execution-graph" data-help="call-tree">Call tree</button></span>
+          <span class="context-help-host"><button id="execution-timeline-tab" aria-pressed="false" aria-controls="timeline-panel" data-help="timeline">Timeline / source</button></span>
+        </div>
+        <div id="timeline-controls" class="timeline-controls hidden">
+          <label class="timeline-filter">Timeline view
+            <select id="timeline-mode"><option value="all">All execution events</option><option value="boundaries">External boundaries and exceptions only</option></select>
+          </label>
+          <label class="timeline-wrap"><input id="timeline-wrap" type="checkbox"> Wrap event text</label>
+        </div>
+        <button id="segment-top" title="Back to segment details and external boundaries" aria-label="Back to segment header">↑ Top</button>
+      </div>
+      <div id="execution-graph" aria-label="Observed segment execution flow" aria-busy="false"></div>
+      <div id="timeline-panel" class="hidden">
+        <div id="boundary-code-context" class="boundary-code-context hidden" role="status"></div>
       <div id="timeline" class="timeline"></div>
+      </div>
     </section>
   </main>
+  <dialog id="help-dialog" aria-labelledby="help-title" aria-describedby="help-intro">
+    <div class="help-heading">
+      <div class="help-brand"><span class="help-brand-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5M7 11h2l1-3 2 6 1-3h2"/></svg></span><div><p class="help-eyebrow">Your guide to the viewer</p><h2 id="help-title">What is TraceLens?</h2></div></div>
+      <button id="help-close" type="button" autofocus aria-label="Close TraceLens guide">Close</button>
+    </div>
+    <div class="help-body">
+      <p id="help-intro">Follow a captured API request across services, then inspect the code that ran.</p>
+      <section class="help-quickstart" aria-labelledby="help-quickstart-title">
+        <div class="help-section-heading"><h3 id="help-quickstart-title">From request to code</h3><span>Four steps to explore a capture</span></div>
+        <ol class="help-steps" role="list">
+          <li class="help-step help-blue"><span class="help-step-number" aria-hidden="true">01</span><div><strong class="help-step-title">Find your request</strong><p>Open <strong>Live requests</strong>. Search the <strong>API path</strong> and narrow the <strong>Time window</strong>.</p></div></li>
+          <li class="help-step help-teal"><span class="help-step-number" aria-hidden="true">02</span><div><strong class="help-step-title">Follow its services</strong><p>Click the API name to open <strong>Request flow</strong> and see the services involved.</p></div></li>
+          <li class="help-step help-purple"><span class="help-step-number" aria-hidden="true">03</span><div><strong class="help-step-title">Find the code</strong><p>Click a service for <strong>Code flow</strong>. Search for a method, then <strong>Show source in timeline</strong>.</p></div></li>
+          <li class="help-step help-amber"><span class="help-step-number" aria-hidden="true">04</span><div><strong class="help-step-title">Save & compare</strong><p>Choose <strong>Save snapshot</strong>. Reopen it in <strong>Saved captures</strong>, or compare two snapshots.</p></div></li>
+        </ol>
+      </section>
+
+      <div class="help-section-heading help-topics-heading"><h3>Explore the viewer</h3><span>Open a topic for the details</span></div>
+      <div class="help-topics" aria-label="TraceLens navigation help">
+        <details class="help-topic help-blue">
+          <summary><span class="help-topic-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></span><span class="help-topic-label"><span class="help-topic-title">Find your request</span><span class="help-topic-description">Filters, identity & live updates</span></span><span class="help-topic-chevron" aria-hidden="true">›</span></summary>
+          <div class="help-topic-body">
+            <p>Search the backend <strong>API path</strong>, which may differ from the page URL. Use <strong>Observed service</strong> and <strong>Outcome</strong> to narrow the list. <strong>More filters</strong> adds user, site, method, channel, duration and trace ID or label. The <strong>User / site</strong> column identifies the caller when captured.</p>
+            <p>In <strong>Live requests</strong>, enter a <strong>Request data keyword</strong> and press <strong>Search</strong> or Enter to find captured API parameter names or values and request-body text, including downstream services. Matching is case-insensitive. Other filters narrow the requests searched. Missing, expired or uncaptured data cannot match; the search reports its coverage. Search again for new requests. Keywords are not saved in Saved views.</p>
+            <p>Expand a <strong>Group repeated APIs</strong> row to select one request. Its <strong>Details</strong> shows full IDs, timestamps and captured service segments. Remove an active filter chip or choose <strong>Reset filters</strong> to broaden the results. <strong>Saved views</strong> remembers filters, not requests.</p>
+            <p><strong>Auto-refresh</strong> updates the list; <strong>Refresh</strong> checks once. If the list is held while you inspect it, choose <strong>Show latest requests</strong>. Request and job tab counts match each tab's filters. The separate <strong>retained</strong> count includes older or filtered-out captures; open <strong>Capture info</strong> for details.</p>
+          </div>
+        </details>
+        <details class="help-topic help-teal">
+          <summary><span class="help-topic-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="8" width="5" height="8" rx="1"/><rect x="16" y="3" width="5" height="6" rx="1"/><rect x="16" y="15" width="5" height="6" rx="1"/><path d="M8 12h4V6h4M12 12v6h4"/></svg></span><span class="help-topic-label"><span class="help-topic-title">Follow the request flow</span><span class="help-topic-description">Services, connections & boundaries</span></span><span class="help-topic-chevron" aria-hidden="true">›</span></summary>
+          <div class="help-topic-body">
+                <p>The heading shows the API being traced. In <strong>Flow diagram</strong>, blue boxes are services, purple boxes are database calls or routing decisions, cyan boxes are cache activity, and orange boxes are queues. Other external boundaries are teal. Click a service to explore its code; click a grouped database routing box to see its recorded events.</p>
+            <p>A cyan <strong>CACHE CALL</strong> card represents a captured client boundary. <strong>CACHE ACCESS</strong> represents a recorded cache-wrapper method when no matching client boundary is available, including in older snapshots. Neither label proves a hit or miss. Choose <strong>View calling code</strong> to inspect the recorded evidence.</p>
+            <p>Click a purple <strong>DB CALL</strong> card to see its grouped SQL executions. Query previews use operation and table names, such as <strong>SELECT · ems.features_v2</strong>, with client-side duration and outcome. Expand an execution for its SQL and use <strong>View calling code</strong> to follow recorded context. Details also appear in <strong>Code flow</strong> and <strong>Timeline / source</strong>. A <strong>SQL CAPTURE LIMIT</strong> notice means more queries were not retained. DB routing boxes are pool choices, not executed queries.</p>
+            <p><strong>ClickHouse</strong> queries appear in a <strong>DB CALL</strong> card too. Expand a query for its recorded SQL and any named bindings. Native-query details distinguish response completion from submission only; their source link opens the boundary event when a reliable caller is unavailable.</p>
+            <p><strong>SQL and parameter values are separate local opt-ins.</strong> When available, details show a reconstructed SQL preview with captured values; the original template and typed bindings remain expandable. Missing or unsupported values stay explicit. This is not exact wire SQL or a replay command. SQL literals and bindings can be sensitive: review snapshots and graph exports before sharing. Result rows are not collected, and a returned query does not establish transaction commit.</p>
+            <p>The diagram's <strong>Fit</strong>, <strong>− / +</strong> and <strong>100%</strong> controls stay visible while you scroll inside it. On a DB, cache or queue card, choose <strong>View calling code</strong>; grouped DB routes have a separate link for each event. This opens the owning service's recorded timeline and highlights the nearest reliable calling context. If source was not captured, you see the boundary event instead. <strong>Open local source</strong> offers editor links when a source coordinate is available; the observed context is not a guaranteed exact callsite.</p>
+            <p>Select any service or boundary card to open its inspector beside the diagram. The graph stays in place while you inspect SQL, captured request data or call details. Choose <strong>Open code flow</strong> for that service's own execution, or <strong>View caller</strong> for the recorded calling location. Caller actions remain available with HTTP hops hidden. Older captures without a calling location explain what is missing instead of guessing a source line.</p>
+            <p><strong>Show HTTP hops</strong> reveals outgoing HTTP boxes hidden when a matching service segment is present. <strong>Service details</strong> shows the same request as a nested list. Open <strong>Partial evidence</strong> for the legend and missing-data notes.</p>
+            <p><strong>Evidence to inspect</strong> highlights recorded failures and missing detail, with links to the owning service or call. It uses the loaded evidence, not a root-cause diagnosis. Expand <strong>Capture detail by service</strong> for the capture's reported depth; an empty summary does not prove the request is healthy.</p>
+            <p>Use <strong>← Requests</strong> to return to the list, or click the <strong>TraceLens</strong> logo to go to Live requests from any view.</p>
+          </div>
+        </details>
+        <details class="help-topic help-purple">
+          <summary><span class="help-topic-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18"/></svg></span><span class="help-topic-label"><span class="help-topic-title">Explore Code flow</span><span class="help-topic-description">Search, focus & open source</span></span><span class="help-topic-chevron" aria-hidden="true">›</span></summary>
+          <div class="help-topic-body">
+            <p><strong>Code flow</strong> shows methods in thread sections; <strong>Call tree</strong> shows their nesting as a diagram. Expand calls or click a method for inline evidence. The diagram keeps <strong>Fit</strong>, zoom, <strong>Expand all / Collapse all</strong> and <strong>Fullscreen</strong> in view. <strong>More</strong> contains thread filtering and <strong>Overview</strong>.</p>
+            <p>At the top of a service's code view, expand <strong>Request data</strong>, when present, to inspect captured query parameters and body data. Each section states whether data was captured or omitted. Review this potentially sensitive evidence before sharing a snapshot.</p>
+            <p>Use <strong>Search retained execution evidence</strong> in either view to find a class, method, exception type or dependency. <strong>Previous match</strong> and <strong>Next match</strong> reveal matches inside collapsed branches. Select a node and choose <strong>Focus selected branch</strong> to isolate its parents and children. <strong>Clear search / focus</strong> restores the previous view without changing zoom.</p>
+            <p><strong>Show source in timeline</strong> opens recorded events and available source lines. Live source uses your current checkout; snapshots keep the lines saved with them. <strong>Open local source</strong>, when available, offers editor links to your current checkout; read its build-mismatch warning before opening. In <strong>Timeline / source</strong>, the back button, view tabs and <strong>Timeline view</strong> filter stay visible as you scroll. The filter can show only boundaries and exceptions. Use <strong>↑ Top</strong> to return to segment details and <strong>Observed external boundaries</strong>.</p>
+            <p>Large traces load a bounded timeline page at a time; use <strong>Previous page</strong> and <strong>Next page</strong>. SQL and request values load when expanded. <strong>Overview</strong> capture keeps request and dependency evidence; <strong>Methods</strong> adds method events without line events; <strong>Methods + lines</strong> adds line events. All levels apply within configured scope and limits; SQL and request values are separate opt-ins. Missing, expired or budget-omitted detail is shown explicitly and cannot be recovered by paging.</p>
+            <p>Use <strong>← request flow</strong> to return. Search covers the bounded execution view, not every raw event. Check the searchable/omitted counts and <strong>Partial evidence</strong>: expanding hidden nodes cannot restore omitted evidence.</p>
+          </div>
+        </details>
+        <details class="help-topic help-red">
+          <summary><span class="help-topic-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></span><span class="help-topic-label"><span class="help-topic-title">Scheduled jobs & Errors</span><span class="help-topic-description">Background runs & captured failures</span></span><span class="help-topic-chevron" aria-hidden="true">›</span></summary>
+          <div class="help-topic-body">
+            <p><strong>Scheduled jobs</strong> keeps background runs separate from Live requests. Filter by job name, service, time or outcome, then expand a group to inspect a run.</p>
+            <p><strong>Errors</strong> groups captured failures. Narrow by error category, HTTP status or exception class, then expand a group to choose a request. Use the <strong>Channel</strong> filter to find scheduled-job failures.</p>
+          </div>
+        </details>
+        <details class="help-topic help-teal">
+          <summary><span class="help-topic-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20V4m0 16h16M8 16v-4m5 4V7m5 9v-7"/></svg></span><span class="help-topic-label"><span class="help-topic-title">Performance insights</span><span class="help-topic-description">Slow SQL & repeated-query evidence</span></span><span class="help-topic-chevron" aria-hidden="true">›</span></summary>
+          <div class="help-topic-body">
+            <p>Open <strong>Performance insights</strong>, choose recent captured requests or a saved capture, then choose <strong>Analyze</strong>. API path and time filters narrow recent requests; each run reads at most ten matching requests. Adjust the query thresholds before running again.</p>
+            <p>Filter findings by slow queries, repeated queries, suspected N+1 or query-heavy segments. Open a request or choose <strong>Open query evidence</strong> to inspect the recorded SQL and calling context. Suspected N+1 is a heuristic, not a confirmed defect; repeated queries can be intentional.</p>
+            <p>Read the analysis timestamp, scan counts and warnings. Results do not refresh automatically. Missing SQL or partial captures can hide findings, and cumulative query time is not request elapsed time. This is local/dev investigation of captured evidence, not continuous high-traffic monitoring.</p>
+          </div>
+        </details>
+        <details class="help-topic help-amber">
+          <summary><span class="help-topic-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg></span><span class="help-topic-label"><span class="help-topic-title">Save, compare & search captures</span><span class="help-topic-description">Before / after evidence & saved results</span></span><span class="help-topic-chevron" aria-hidden="true">›</span></summary>
+          <div class="help-topic-body">
+            <p>Choose <strong>Save snapshot</strong> on a request or in its row's <strong>Details</strong>. Reopen it in <strong>Saved captures</strong>; it is fixed evidence, not live data. <strong>Viewer file</strong> identifies a saved snapshot. For an older <strong>Browser only</strong> capture, choose <strong>Save to viewer</strong> first.</p>
+            <p>Open <strong>Saved captures</strong>, select two viewer captures (Before first), then <strong>Compare selected</strong>. Review the pair and choose <strong>Compare saved snapshots</strong>. You can also open <strong>Compare &amp; search saved captures</strong> → <strong>Compare snapshots</strong> and choose a <strong>Baseline snapshot</strong> (Before) and <strong>Candidate snapshot</strong> (After). Review response and call changes side by side, select a finding, or use <strong>Find in these two captures</strong>. Changed methods are grouped under their recorded parent where supported. Evidence links open the saved invocation; <strong>Back to comparison</strong> restores your comparison context. <strong>All differences</strong> contains detailed counts. Check comparability first: a missing observation is not proof of removed code or a skipped call, and one timing difference is not a benchmark.</p>
+            <p>Choose <strong>Search saved evidence</strong> to find a class, method, exception type or destination across saved files. Open a matching snapshot and review reported search limits; no match does not prove code was unused. <strong>Use with CLI/MCP</strong> offers an explicit minimized copy for other tools; it leaves the original unchanged. Review its privacy note before creating a copy.</p>
+            <p><strong>Share / export</strong> offers <strong>Copy snapshot link</strong>, <strong>Copy live request link</strong> and <strong>Download graph JSON</strong>. Links point to this viewer, not a public sharing site. <strong>Saved views</strong> remembers filters only.</p>
+            <p>Large saved captures also offer <strong>Download capture archive</strong>. In <strong>Saved captures</strong>, use <strong>Import capture archive</strong> to reopen that ZIP as a new saved capture without reading live services. Review potentially sensitive request data, SQL and source before sharing archives.</p>
+          </div>
+        </details>
+        <details class="help-topic help-slate">
+          <summary><span class="help-topic-icon"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 .5c0 2-2.5 2-2.5 4M12 17h.01"/></svg></span><span class="help-topic-label"><span class="help-topic-title">Can't find a request?</span><span class="help-topic-description">Check capture readiness & watch a reproduction</span></span><span class="help-topic-chevron" aria-hidden="true">›</span></summary>
+          <div class="help-topic-body">
+            <ol>
+              <li>Check the service status beside the TraceLens logo, then choose <strong>Refresh</strong> or <strong>Show latest requests</strong> if available.</li>
+              <li>Check the selected tab: API calls are in <strong>Live requests</strong>, background runs in <strong>Scheduled jobs</strong> and snapshots in <strong>Saved captures</strong>.</li>
+              <li>Search the API path rather than the browser page URL. Broaden the <strong>Time window</strong>, remove filter chips or choose <strong>Show all retained</strong> when the list is empty.</li>
+              <li>Open <strong>Capture info</strong> to check what is available. Filters and Refresh cannot recover expired or uncaptured requests.</li>
+            </ol>
+            <p>For a fresh reproduction, open <strong>Start an investigation</strong> on Requests. Enter the exact <strong>Backend path</strong>, optionally narrow by method, service, user or site, and choose <strong>Check capture readiness</strong> to check capture settings and look for existing traces. This does not diagnose application bugs.</p>
+            <p>An empty Live requests list offers <strong>Check capture for this API</strong> and <strong>Capture my next reproduction</strong>. These prepare a draft only. Review and confirm its exact path and filters before checking or watching; a list substring is not an exact backend path.</p>
+            <p>Select a 60- or 120-second <strong>Watch window</strong> and choose <strong>Watch next request & save</strong>. Wait for <strong>Watching</strong>, then reproduce one matching action in your application. Only one completed, unambiguous new match is saved; review its warnings. <strong>Cancel watch</strong>, closing the panel or leaving the view stops the watch. This does not enable recording or replay your request.</p>
+          </div>
+        </details>
+      </div>
+    </div>
+    <div class="help-footer"><span><kbd>Esc</kbd> to close</span><span>Your current view stays in place.</span></div>
+  </dialog>
   <dialog id="name-dialog"><form method="dialog"><h2 id="name-title">Name capture</h2><label>Name<input id="name-input" maxlength="100" required autocomplete="off"></label><p id="name-help"></p><div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button id="name-submit" value="save">Save</button></div></form></dialog>
+  <script src="/static/help.js"></script>
+  <script src="/static/context-help.js"></script>
   <script src="/static/request-model.js"></script>
+  <script src="/static/request-insights.js"></script>
+  <script src="/static/request-search.js"></script>
+  <script src="/static/evidence-copy.js"></script>
+  <script src="/static/request-data.js"></script>
   <script src="/static/browser-store.js"></script>
+  <script src="/static/viewer-store.js"></script>
+  <script src="/static/large-trace.js"></script>
   <script src="/static/request-ui.js"></script>
-  <script src="/static/trace-graph.js"></script>
+  <script src="/static/sql-values.js"></script>
   <script src="/static/dependency-ui.js"></script>
+  <script src="/static/trace-graph.js"></script>
+  <script src="/static/performance-model.js"></script>
+  <script src="/static/performance-ui.js"></script>
+  <script src="/static/cache-evidence.js"></script>
+  <script src="/static/boundary-source.js"></script>
+  <script src="/static/execution-graph.js"></script>
+  <script src="/static/code-flow.js"></script>
+  <script src="/static/guided-investigation.js"></script>
+  <script src="/static/capture-tools.js"></script>
+  <script src="/static/sticky-toolbar.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

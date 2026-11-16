@@ -47,7 +47,7 @@ public final class TraceLensFilter implements Filter {
             config = new TraceLensConfigLoader().load();
             store = new TraceStore(config);
             debug = new TraceLensDebugApi(store, new TraceExporter(config, true), config);
-            includePaths = System.getProperty("tracelens.http.includePaths", "/").split(",");
+            includePaths = config.getHttpIncludePaths().toArray(new String[0]);
             TraceRecording.install(store);
             TraceRuntime.registerLifecycleListener(new TraceLifecycle(new Tracer(store)));
             store.startSweeper();
@@ -169,7 +169,7 @@ public final class TraceLensFilter implements Filter {
 
     private boolean included(String path) {
         for (String prefix : includePaths) {
-            prefix = prefix.trim();
+            while (prefix.length() > 1 && prefix.endsWith("/")) prefix = prefix.substring(0, prefix.length() - 1);
             if (prefix.equals("/") || path.equals(prefix) || path.startsWith(prefix + "/")) return true;
         }
         return false;

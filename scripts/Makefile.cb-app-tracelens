@@ -14,8 +14,7 @@
 
 export TRACELENS_HOME ?= $(abspath ../cb-tracelens)
 export TRACELENS_VERSION ?= 0.1.1-SNAPSHOT
-export TRACELENS_CONFIG ?= $(TRACELENS_HOME)/scripts/cb-app-tracelens.json
-export TRACELENS_HTTP_PATHS ?= /api/v2/features
+export TRACELENS_CONFIG ?= $(abspath .run/tracelens/tracelens.json)
 export TRACELENS_PORT ?= 7778
 
 .PHONY: up restart check status help
@@ -72,6 +71,7 @@ help:
 		'make -f Makefile.tracelens restart  Restart built cb-app with tracing/jobs; clears Tomcat logs.' \
 		'make -f Makefile.tracelens check    Check wiring, agent, config and settings; no service changes.' \
 		'make -f Makefile.tracelens status   Read the agent summary (default port 7778).' \
-		'Overrides: TRACELENS_HOME, TRACELENS_VERSION, TRACELENS_CONFIG, TRACELENS_HTTP_PATHS, TRACELENS_PORT.' \
+		'Overrides: TRACELENS_HOME, TRACELENS_VERSION, TRACELENS_CONFIG, TRACELENS_PORT.' \
+		'Capture settings (including httpIncludePaths) live only in the selected JSON.' \
 		'TRACELENS_HOME and TRACELENS_CONFIG overrides must use absolute paths.' \
 		'Use normal make down to stop cb-app; this file does not start EMS or the TraceLens viewer.'

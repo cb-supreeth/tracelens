@@ -1,0 +1,25 @@
+{
+  "trace": {
+    "traceId": "abc12345-dead-beef",
+    "lensId": "flow",
+    "user": "dev",
+    "entryChannel": "HTTP",
+    "status": "FAILED",
+    "startNanos": 1000000,
+    "durationMs": 12,
+    "eventCount": 8,
+    "truncated": true,
+    "attributes": {"httpStatus": "500", "siteId": "42", "siteType": "test", "requestId": "r1"},
+    "events": [
+      {"seq": 1, "type": "METHOD_ENTER", "className": "sample.Flow", "methodName": "run", "thread": "http-nio-8082-exec-3", "nanoTime": 1000000},
+      {"seq": 2, "type": "LINE", "className": "sample.Flow", "line": 2, "thread": "http-nio-8082-exec-3", "nanoTime": 2000000},
+      {"seq": 3, "type": "LINE", "className": "sample.Flow", "line": 2, "thread": "http-nio-8082-exec-3", "nanoTime": 3000000, "methodName": null},
+      {"seq": 4, "type": "DB_ROUTE", "thread": "worker", "nanoTime": 4000000, "attributes": {"route": "TEST_MASTER"}},
+      {"seq": 5, "type": "EXTERNAL_CALL", "thread": "worker", "nanoTime": 5000000, "message": "Sqs.send"},
+      {"seq": 6, "type": "EXCEPTION", "className": "sample.Flow", "methodName": "run", "thread": "worker", "nanoTime": 6000000, "message": "bad input", "attributes": {"exceptionType": "IllegalStateException"}},
+      {"seq": 7, "type": "METHOD_EXIT", "className": "sample.Flow", "methodName": "run", "thread": "worker", "nanoTime": 7000000},
+      {"seq": 8, "type": "MARKER", "thread": "worker", "nanoTime": 8000000, "attributes": {"phase": "done"}}
+    ]
+  },
+  "rendered": "trace abc12345… \"flow\" — user=dev channel=HTTP status=FAILED http=500 duration=12ms events=8 [TRUNCATED]\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nsite: 42 (test)  requestId=r1\n── thread: http-exec-3 ────────────────────────────────────────\n    #1    0.000ms ▶ Flow.run\n    #2    1.000ms   · Flow:2  (x2)\n── thread: worker ────────────────────────────────────────\n    #4    3.000ms   ◆ DB_ROUTE: route=TEST_MASTER\n    #5    4.000ms   ◆ EXTERNAL_CALL: Sqs.send\n    #6    5.000ms   ✖ Flow.run threw IllegalStateException: bad input\n    #7    6.000ms ◀ Flow.run\n    #8    7.000ms ◆ MARKER: phase=done"
+}

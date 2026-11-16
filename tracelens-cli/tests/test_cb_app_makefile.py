@@ -14,7 +14,7 @@ WRAPPER = ROOT / "scripts" / "Makefile.cb-app-tracelens"
 
 
 def test_bundled_service_identity_matches_registry_not_repository_name():
-    agent_config = json.loads((ROOT / "scripts/cb-app-tracelens.json").read_text())
+    agent_config = json.loads((ROOT / "scripts/cb-app/tracelens.json").read_text())
     registry = json.loads((ROOT / "scripts/services-local.json").read_text())
     app = next(service for service in registry["services"] if service["name"] == "cb-app")
     assert agent_config["applicationId"] == app["name"] == "cb-app"
@@ -31,7 +31,10 @@ def checkout(tmp_path):
     (lens / "scripts").mkdir(parents=True)
     (lens / "tracelens-agent/build/libs").mkdir(parents=True)
     shutil.copyfile(ROOT / "scripts/cb-app-setenv.sh", lens / "scripts/cb-app-setenv.sh")
-    (lens / "scripts/cb-app-tracelens.json").write_text("{}")
+    (lens / "scripts/cb-app").mkdir()
+    (lens / "scripts/cb-app/tracelens.json").write_text("{}")
+    (app / ".run/tracelens").mkdir(parents=True)
+    (app / ".run/tracelens/tracelens.json").write_text('{"httpIncludePaths":["/api/v2/features"]}')
     (lens / "tracelens-agent/build/libs/tracelens-agent-0.1.1-SNAPSHOT-agent.jar").touch()
     (app / "tomcat/bin/setenv.sh").write_text(
         '. "$TRACELENS_HOME/scripts/cb-app-setenv.sh" || exit 1\n'
@@ -81,7 +84,9 @@ def test_default_up_attaches_once_and_preserves_existing_options(checkout):
     app, _ = checkout
     result = run_make(app, extra_env={"CATALINA_OPTS": "-Xmx1g"})
     assert result.returncode == 0, result.stderr
-    assert "LIFECYCLE=up TRACELENS=1 PORT=7778 PATHS=/api/v2/features" in result.stdout
+    assert "LIFECYCLE=up TRACELENS=1 PORT=7778 PATHS= CONFIG=" in result.stdout
+    assert f"-Dtracelens.configPath={app}/.run/tracelens/tracelens.json" in result.stdout
+    assert "-Dtracelens.http.includePaths" not in result.stdout
     assert "BEFORE_OPTS=-Xmx1g\n" in result.stdout
     assert "AFTER_OPTS=-Xmx1g -javaagent:" in result.stdout
     assert result.stdout.count("-javaagent:") == 1
@@ -103,10 +108,10 @@ def test_overrides_reach_the_real_startup_hook(checkout):
     result = run_make(
         app, "up", f"TRACELENS_HOME={custom}", "TRACELENS_VERSION=test",
         f"TRACELENS_CONFIG={custom}/scripts/custom.json",
-        "TRACELENS_PORT=7782", "TRACELENS_HTTP_PATHS=/api/v2/features,/api/v2/items",
+        "TRACELENS_PORT=7782",
     )
     assert result.returncode == 0, result.stderr
-    assert "PORT=7782 PATHS=/api/v2/features,/api/v2/items" in result.stdout
+    assert "PORT=7782 PATHS= CONFIG=" in result.stdout
     assert f"-javaagent:{custom}/tracelens-agent/build/libs/tracelens-agent-test-agent.jar" in result.stdout
     assert f"-Dtracelens.configPath={custom}/scripts/custom.json" in result.stdout
 
@@ -125,7 +130,7 @@ def test_restart_delegates_in_order_without_full_up(checkout):
 @pytest.mark.parametrize("missing", [
     "Makefile", "local-setup", "tomcat/bin/setenv.sh",
     "../cb-tracelens/scripts/cb-app-setenv.sh",
-    "../cb-tracelens/scripts/cb-app-tracelens.json",
+    ".run/tracelens/tracelens.json",
     "../cb-tracelens/tracelens-agent/build/libs/tracelens-agent-0.1.1-SNAPSHOT-agent.jar",
 ])
 def test_missing_prerequisite_blocks_lifecycle(checkout, missing):
@@ -146,6 +151,14 @@ def test_commented_out_hook_does_not_pass_check(checkout):
     assert "LIFECYCLE=" not in result.stdout
 
 
+def test_obsolete_path_override_blocks_lifecycle(checkout):
+    app, _ = checkout
+    result = run_make(app, "up", "TRACELENS_HTTP_PATHS=/api/v2/subscriptions")
+    assert result.returncode != 0
+    assert "httpIncludePaths" in result.stderr
+    assert "LIFECYCLE=" not in result.stdout
+
+
 @pytest.mark.parametrize("port", ["not-a-port", "-1", "65536", "99999999999999999999999999999"])
 def test_invalid_port_blocks_lifecycle(checkout, port):
     app, _ = checkout
@@ -156,7 +169,7 @@ def test_invalid_port_blocks_lifecycle(checkout, port):
 
 @pytest.mark.parametrize("setting", [
     "TRACELENS_HOME=../cb-tracelens",
-    "TRACELENS_CONFIG=../cb-tracelens/scripts/cb-app-tracelens.json",
+    "TRACELENS_CONFIG=../cb-tracelens/scripts/cb-app/tracelens.json",
 ])
 def test_relative_path_overrides_are_rejected_before_cwd_changes(checkout, setting):
     app, _ = checkout
