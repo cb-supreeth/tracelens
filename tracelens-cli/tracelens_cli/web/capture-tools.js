@@ -252,6 +252,23 @@
       findings.append(card);
     });
     review.append(findings);
+    const flowApi = (typeof globalThis !== "undefined" ? globalThis : {}).TraceLensCompareFlow;
+    let disposeFlow = () => {};
+    if (flowApi && typeof flowApi.render === "function") {
+      const flow = el(doc, "details", "tct-flow"), flowBody = el(doc, "div", "tct-flow-body");
+      flow.append(el(doc, "summary", "", "Flow view · services, calls and methods"), flowBody);
+      let drawn = false;
+      listen(flow, "toggle", () => {
+        if (!flow.open || drawn || disposed) return;
+        drawn = true;
+        disposeFlow = flowApi.render(flowBody, rows, {limited: Boolean(behavior.limited || value.limited)}, {onSelect: row => {
+          search.value = ""; clearPairSearch(); focusedRow = row; draw();
+          const selected = body.querySelector(".tct-behavior-row");
+          if (selected && typeof selected.scrollIntoView === "function") selected.scrollIntoView({block: "nearest"});
+        }});
+      });
+      review.append(flow);
+    }
     const quality = el(doc, "details", "tct-quality");
     const qualityWarnings = [...new Set([...(Array.isArray(value.warnings) ? value.warnings : []), ...(Array.isArray(behavior.warnings) ? behavior.warnings : [])])];
     const flags = [];
@@ -401,6 +418,7 @@
       clearRows(); body.replaceChildren();
       const query = search.value.trim().slice(0, 128).toLowerCase();
       focusBar.hidden = !focusedRow;
+      if (typeof disposeFlow.select === "function") disposeFlow.select(focusedRow);
       focusLabel.textContent = focusedRow ? `Focused difference: ${text(focusedRow.service)} · ${behaviorIdentity(focusedRow)}` : "";
       const matching = rows.filter(row => (!focusedRow || row === focusedRow) && (matchesBehavior(row, query) || nestedMethodChanges(row).some(child => matchesBehavior(child, query))));
       const changes = matching.filter(row => row.disposition !== "unchanged"), common = matching.filter(row => row.disposition === "unchanged");
@@ -419,9 +437,9 @@
         }
         body.append(section);
       });
-      if (!changes.length) body.append(el(doc, "p", "tct-muted", query ? "No changed groups match this search. Common recorded context may appear below." : "No behavior differences in the returned evidence. This does not establish identical behavior or full coverage."));
+      if (!changes.length && !focusedRow) body.append(el(doc, "p", "tct-muted", query ? "No changed groups match this search. Common recorded context may appear below." : "No behavior differences in the returned evidence. This does not establish identical behavior or full coverage."));
       if (common.length) {
-        const details = el(doc, "details", "tct-common-context"); details.open = Boolean(query);
+        const details = el(doc, "details", "tct-common-context"); details.open = Boolean(query) || Boolean(focusedRow);
         details.append(el(doc, "summary", "", `Common recorded context · ${common.length} groups`), el(doc, "p", "tct-muted", "Matching request/call identities and recorded counts or outcomes. This does not establish identical inputs, timing, source, or execution order."));
         common.slice(0, 40).forEach(row => details.append(pairRow(row)));
         if (common.length > 40) details.append(el(doc, "p", "tct-muted", `${common.length - 40} more common groups. Narrow the pair search to inspect them.`));
@@ -500,7 +518,7 @@
     advanced.append(el(doc, "summary", "", "All differences · counts, lines & raw identities"));
     const raw = el(doc, "div", "tct-raw-comparison"); renderRawComparison(raw, value, true); advanced.append(raw);
     container.replaceChildren(review, advanced); draw();
-    return () => { disposed = true; pairSearchGeneration++; clearRows(); pairSearchListeners.splice(0).forEach(remove => remove()); listeners.splice(0).forEach(remove => remove()); };
+    return () => { disposed = true; pairSearchGeneration++; disposeFlow(); clearRows(); pairSearchListeners.splice(0).forEach(remove => remove()); listeners.splice(0).forEach(remove => remove()); };
   }
 
   // options.api(path, method, body) is the host's bounded same-origin JSON API.

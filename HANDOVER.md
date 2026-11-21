@@ -1,5 +1,63 @@
 # TraceLens handover
 
+## Update 2026-11-22 — compare Flow view, phase 1 (model: Fable 5.2)
+
+**Done:** Added an optional Flow view to the saved-snapshot comparison. New
+`web/compare-flow.js` and `web/compare-flow.css`; `web/capture-tools.js` mounts it
+as a collapsed section under the findings and focuses the matching list row when
+a node is selected; `web/index.html` loads the two files;
+`tests/compare-flow.test.cjs` covers the model, rendering, caps and integration;
+`docs/developer-workflow.md` documents it. Viewer only: no server, schema or
+endpoint change. Not committed.
+
+Selecting a node whose row is unchanged now opens the collapsed "Common recorded
+context" section so the focused row is visible (one-line change in `draw()`,
+contributed by a parallel session), and the "No behavior differences" note is
+hidden while a row is focused.
+
+**Decision:** Draw one graph grouped by calling service, built only from the
+existing `behavior` rows, in HTML (buttons and CSS connectors). Rejected: two
+side-by-side sequence diagrams (reader still hunts for the difference);
+extending `trace-graph.js` (1,678 lines built for one live trace, risk to the
+trace view); SVG nodes (long class names and paths do not wrap). Trade-off: the
+view shows grouping, not order. Revisit when phase 2 data exists.
+
+**Verified:** `node --test tracelens-cli/tests/*.test.cjs` 884 pass;
+`./gradlew :tracelens-tool:test :tracelens-agent:javaBundle --offline` exit 0.
+Rendered the real viewer JS and CSS in headless Chrome with a synthetic
+comparison at 1280px and 500px: flow draws, node selection focuses the list row,
+the configured-name reference selects the downstream service, "Show all changes"
+restores the list, no horizontal overflow.
+
+**Verified with real snapshots (2026-11-22):** started the fresh bundle on port
+7791 over a copy of namespace `907cb339…` from `~/.tracelens/setup/viewer-snapshots`
+and fetched three real comparisons from `/api/capture-tools/compare` (UBB-4005
+before/after, Cache MISS/HIT, cart_sub_create 3/2). Rendered each through the real
+viewer JS in headless Chrome at 1280px and 500px and clicked every node: 41, 19 and
+1 nodes, each focused a visible list row; no horizontal overflow; no script errors.
+Found and fixed: cache and database calls have no recorded destination, so their
+nodes were titled only "set" / "executeQuery"; they are now "redis set",
+"postgresql executeQuery". Review pass: the highlighted node now follows a focus
+set or cleared in the list. 889 viewer tests pass; Gradle tool tests and bundle exit 0.
+
+**Broken or risky / not verified:** The page itself was not driven in the running
+viewer (snapshot picker → Compare → Flow view → open saved evidence), because the
+built-in browser pane refuses to open the local viewer. Downstream "matched by
+configured name" references were not seen on real data: this config has no
+`dependencyAliases`. The viewer is dark-only, so there is no light theme to
+check. A viewer only lists snapshots in its own namespace folder
+(hash of the service mappings), so the running viewer on 7781 (namespace
+`29cffed9…`) shows none of the older saved snapshots.
+
+**Next (phase 2):** add a `flow` block in `CaptureTools.compareSavedSnapshots`
+with per-caller call rank, the enclosing method of each call and the call
+`spanId`, to enable "first change", method-to-call links and exact downstream
+links. Saved comparisons today carry none of these
+(`correspondence_is_not_execution_order`).
+
+**Do not touch:** the default stays the list view; the flow view must keep
+writing evidence with `textContent` only.
+
 ## Latest session — 2026-11-12 — continuation guide
 
 **Scope:** TraceLens is a local-first Java execution tracer for investigating

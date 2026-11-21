@@ -144,6 +144,17 @@ intentionally skipped that call. Select a finding to inspect both sides and open
 the exact saved service invocation. **Back to comparison** restores the comparison
 context and inspection position.
 
+**Flow view** is an optional picture of the same comparison: open **Flow view ·
+services, calls and methods** under the findings. Each compared service is a node,
+with its external calls beside it and its differing methods in an expandable tree
+below. Colour, border and a text label mark each node as unchanged, changed, before
+only or after only. Selecting a node focuses the matching row in the list.
+Saved comparisons do not record call order, so calls are grouped by state, not by
+time, and nothing is marked as the first change. A call links to a downstream
+service only when its configured `dependencyAliases` name equals another compared
+service; that link is a name match, not proof the call reached that request.
+Methods are not linked to the calls they made. The list remains the default.
+
 **Changed methods** shows the outermost supported recorded parent by default.
 Expand nested differences to inspect children. A parent whose counts stayed equal
 can contain changed children; this is not a claim its implementation changed.
