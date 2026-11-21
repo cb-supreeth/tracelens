@@ -57,11 +57,12 @@
     return inner ? "inner_changed" : "unchanged";
   }
   function summarize(services) {
-    const summary = {outcomes: [], calls: {before_only: 0, after_only: 0, changed: 0}, methods: 0};
+    const summary = {outcomes: [], calls: {before_only: 0, after_only: 0, changed: 0}, methods: 0, outermostMethods: 0};
     services.forEach(service => {
       service.outcomes.filter(differs).forEach(row => summary.outcomes.push(row));
       service.calls.forEach(row => { if (row.disposition in summary.calls) summary.calls[row.disposition]++; });
       service.methods.forEach(row => {
+        if (differs(row)) summary.outermostMethods++;
         const nested = Array.isArray(row.nestedChanges) ? row.nestedChanges.filter(child => child && ownChange.includes(child.disposition)).length : 0;
         summary.methods += (ownChange.includes(row.disposition) ? 1 : 0) + Math.max(count(row.nestedChangedCount), nested);
       });
@@ -171,7 +172,9 @@
       if (summary.calls.before_only) parts.push(`${plural(summary.calls.before_only, "call", "calls")} no longer observed`);
       if (summary.calls.after_only) parts.push(`${plural(summary.calls.after_only, "call", "calls")} newly observed`);
       if (summary.calls.changed) parts.push(`${plural(summary.calls.changed, "call", "calls")} changed`);
-      if (summary.methods) parts.push(plural(summary.methods, "method differs", "methods differ"));
+      // Lead with the outermost count so it matches the list's "Changed methods" heading.
+      if (summary.outermostMethods) parts.push(plural(summary.outermostMethods, "method differs", "methods differ") +
+        (summary.methods > summary.outermostMethods ? ` (${summary.methods} including nested)` : ""));
       if (!outcomes.length && !parts.length) {
         box.append(el("strong", "", "No differences in the returned evidence."));
         return box;

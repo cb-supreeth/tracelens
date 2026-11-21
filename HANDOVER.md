@@ -14,6 +14,10 @@ shows the selected node before and after with its saved-evidence buttons and a
 highest-priority finding. Also fixed a bug shipped in `41adf61`: the `tcf-`
 class prefix collided with the Code flow view (`.tcf-node`, `.tcf-title`,
 `.tcf-method`), so styles leaked both ways; the prefix is now `cfv-`.
+List focus no longer drives the graph selection (this replaces the earlier
+"highlight follows list focus" behavior); the graph selection is whatever fills
+the Selected panel. The headline method count matches the list's outermost
+count, with the nested total in brackets.
 
 **Decision:** The panel reuses `pairRow` from `capture-tools.js`, so evidence
 buttons and their exact-ref checks are the list's own; the panel keeps its own

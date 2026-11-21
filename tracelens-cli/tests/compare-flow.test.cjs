@@ -118,6 +118,10 @@ test("the headline says plainly when nothing differs", () => {
 test("nested method counts use the backend total and are not counted twice", () => {
   const values = rows(); values[5].nestedChangedCount = 9; values[5].disposition = "changed";
   assert.equal(flow.buildModel(values).summary.methods, 10);
+  assert.equal(flow.buildModel(values).summary.outermostMethods, 1);
+  const h = fixture();
+  flow.render(h.container, values, {}, {});
+  assert.match(h.find("cfv-headline").textContent, /1 method differs \(10 including nested\)/);
 });
 
 test("selecting a node reports the row, and the owning list row for a nested method", () => {

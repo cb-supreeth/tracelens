@@ -581,7 +581,7 @@ test("findings focus their paired evidence with keyboard controls, and search or
   assert.equal(h.find("tct-focus-bar").hidden, false);
   assert.equal(h.find("tct-behavior-rows").all().filter(node => node.classList.contains("tct-behavior-row")).length, 1);
   assert.match(h.find("tct-focus-label").textContent, /ems\.local/);
-  assert.equal(h.find("tct-behavior-row").focused, true);
+  assert.equal(h.find("tct-behavior-rows").querySelector(".tct-behavior-row").focused, true);
   await h.find("tct-clear-focus").fire("click");
   assert.equal(h.find("tct-focus-bar").hidden, true);
   assert.ok(h.find("tct-behavior-outcomes")); assert.ok(h.find("tct-behavior-methods"));
