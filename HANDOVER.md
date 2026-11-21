@@ -1,5 +1,44 @@
 # TraceLens handover
 
+## Update 2026-11-22 — compare Flow view UX pass (model: Opus 5.5)
+
+**Done:** Five changes to the saved-snapshot Flow view, all viewer-only:
+(1) a **Selected** panel beside the graph (sticky; above the graph under 900px)
+shows the selected node before and after with its saved-evidence buttons and a
+**Show in list** button; a graph click no longer narrows or scrolls the list;
+(2) a headline with response changes and counts of calls and methods;
+(3) dense one-line method rows, with plain `get*`/`set*` children folded into
+"N plain getters and setters" (outermost methods, `is*`/`has*` never fold);
+(4) unchanged services shrink to one line after the services that differ;
+(6) the view opens by default when anything differs and preselects the
+highest-priority finding. Also fixed a bug shipped in `41adf61`: the `tcf-`
+class prefix collided with the Code flow view (`.tcf-node`, `.tcf-title`,
+`.tcf-method`), so styles leaked both ways; the prefix is now `cfv-`.
+
+**Decision:** The panel reuses `pairRow` from `capture-tools.js`, so evidence
+buttons and their exact-ref checks are the list's own; the panel keeps its own
+listener collection because `draw()` clears `rowListeners`. Rejected: rebuilding
+the detail inside `compare-flow.js` (duplicate evidence logic). Accessor folding
+is name-based and deliberately narrow because `is*` methods are often decision
+points (e.g. `isGrandfatheringEnabled` in the cache comparison).
+
+**Verified:** `node --test tracelens-cli/tests/*.test.cjs` 897 pass (22 flow
+tests, rewritten for the new contract, none skipped);
+`./gradlew :tracelens-tool:test :tracelens-agent:javaBundle --offline` exit 0.
+Fresh bundle served on 7791 over a copy of namespace `907cb339…`; three real
+comparisons rendered in headless Chrome at 1280px and 500px: every node click
+(42 / 33 / 1) changed the panel and left it inside the viewport, including the
+last node at page end; a panel evidence button reached the stub after a list
+redraw; Show in list focused a visible row; no horizontal overflow; Code flow's
+`.tcf-title` keeps 14px. The no-differences pair stays closed and shows "No
+differences" when opened.
+
+**Broken or risky / not verified:** Not clicked through in the running viewer
+page (pane cannot open the local viewer). The headline method count includes
+every nested difference reported by the backend (107 on UBB-4005), which is
+accurate but large. Item 5 (rename to "Change map") and the polish list were not
+in scope.
+
 ## Update 2026-11-22 — compare Flow view, phase 1 (model: Fable 5.2)
 
 **Done:** Added an optional Flow view to the saved-snapshot comparison. New

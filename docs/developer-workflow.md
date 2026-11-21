@@ -144,16 +144,22 @@ intentionally skipped that call. Select a finding to inspect both sides and open
 the exact saved service invocation. **Back to comparison** restores the comparison
 context and inspection position.
 
-**Flow view** is an optional picture of the same comparison: open **Flow view ·
-services, calls and methods** under the findings. Each compared service is a node,
-with its external calls beside it and its differing methods in an expandable tree
-below. Colour, border and a text label mark each node as unchanged, changed, before
-only or after only. Selecting a node focuses the matching row in the list.
-Saved comparisons do not record call order, so calls are grouped by state, not by
-time, and nothing is marked as the first change. A call links to a downstream
-service only when its configured `dependencyAliases` name equals another compared
-service; that link is a name match, not proof the call reached that request.
-Methods are not linked to the calls they made. The list remains the default.
+**Flow view** pictures the same comparison. It opens by default when anything
+differs and starts with a headline, for example "cb-app response HTTP 404 → HTTP
+200 · 1 call no longer observed · 3 calls changed · 107 methods differ". Each
+service that differs is drawn with its external calls beside it and its
+differing methods as compact rows below; plain `get*`/`set*` methods under a
+parent fold into "N plain getters and setters" (`is*`/`has*` stay visible).
+Services where nothing differs shrink to one line at the end. Colour, border and a
+text label mark each node as unchanged, changed, before only or after only.
+Selecting a node shows it before and after in the **Selected** panel beside the
+graph (above it on narrow screens), with its saved-evidence buttons; **Show in
+list** focuses the matching row in the list. The most important difference is
+preselected. Saved comparisons do not record call order, so calls are grouped by
+state, not by time, and nothing is marked as the first change. A call links to a
+downstream service only when its configured `dependencyAliases` name equals
+another compared service; that link is a name match, not proof the call reached
+that request. Methods are not linked to the calls they made.
 
 **Changed methods** shows the outermost supported recorded parent by default.
 Expand nested differences to inspect children. A parent whose counts stayed equal

@@ -86,47 +86,99 @@ test("malformed, unknown and unattributed rows are never drawn", () => {
   assert.equal(flow.buildModel(undefined).services.length, 0);
 });
 
-test("render draws services, calls, the unchanged group and the method tree as text", () => {
+test("render draws a headline, services, calls, the unchanged group and the method tree as text", () => {
   const h = fixture();
   flow.render(h.container, rows(), {limited: true}, {});
   const content = h.container.textContent;
+  const headline = h.find("cfv-headline").textContent;
+  assert.match(headline, /cb-app response HTTP 404 · COMPLETED → HTTP 200 · COMPLETED · cb-ems response HTTP 404 → Not observed/);
+  assert.match(headline, /1 call no longer observed/);
+  assert.match(headline, /1 method differs/);
+  assert.doesNotMatch(headline, /removed/i);
+  assert.match(headline, /Bounded comparison/);
   assert.match(content, /cb-app.*POST \/subscriptions.*HTTP 404 · COMPLETED → HTTP 200 · COMPLETED.*Changed/);
   assert.match(content, /GET cb-ems.*\/entitlements.*before 1 · after 0.*Before only/);
   assert.match(content, /cb-ems request.*Matched by configured name/);
   assert.match(content, /2 unchanged calls/);
   assert.match(content, /Methods in cb-app · 1 outermost difference/);
-  assert.match(content, /FeatureGuard\.check.*Nested behavior differs.*EntitlementClient\.fetch.*Before only/);
+  assert.match(content, /Nested behavior differs.*FeatureGuard\.check.*Before only.*EntitlementClient\.fetch/);
   assert.doesNotMatch(content, /Ignored\.same/);
   assert.match(content, /3 more nested differences/);
   assert.match(content, /do not record call order/);
-  assert.match(content, /Bounded comparison/);
-  assert.equal(h.findAll("tcf-call").find(node => /unchanged calls/.test(node.textContent)).tagName, "div");
+  assert.equal(h.findAll("cfv-call").find(node => /unchanged calls/.test(node.textContent)).tagName, "div");
+  assert.equal(h.findAll("tcf-node").length + h.findAll("tcf-title").length, 0, "no class shared with the Code flow view");
 });
 
-test("selecting a node reports the original row and marks only that node as pressed", () => {
+test("the headline says plainly when nothing differs", () => {
+  const h = fixture();
+  flow.render(h.container, [call("app", "x", "unchanged", 1, 1)], {}, {});
+  assert.match(h.find("cfv-headline").textContent, /No differences in the returned evidence/);
+});
+
+test("nested method counts use the backend total and are not counted twice", () => {
+  const values = rows(); values[5].nestedChangedCount = 9; values[5].disposition = "changed";
+  assert.equal(flow.buildModel(values).summary.methods, 10);
+});
+
+test("selecting a node reports the row, and the owning list row for a nested method", () => {
   const h = fixture(), values = rows(), picked = [];
-  const stop = flow.render(h.container, values, {}, {onSelect: row => picked.push(row)});
-  const callNode = h.findAll("tcf-call")[0], service = h.find("tcf-service");
+  const stop = flow.render(h.container, values, {}, {onSelect: (row, listRow) => picked.push([row, listRow])});
+  const callNode = h.findAll("cfv-call")[0], service = h.find("cfv-service");
   callNode.fire("click");
-  assert.equal(picked[0], values[2]);
+  assert.deepEqual(picked[0], [values[2], values[2]]);
   assert.equal(callNode.getAttribute("aria-pressed"), "true");
   service.fire("click");
-  assert.equal(picked[1], values[0]);
+  assert.equal(picked[1][0], values[0]);
   assert.equal(callNode.getAttribute("aria-pressed"), "false");
-  h.find("tcf-ref").fire("click");
-  assert.equal(picked[2], values[1]);
-  const nested = h.findAll("tcf-method-node")[1];
-  nested.fire("click");
-  assert.equal(picked[3], values[5], "a nested method opens its outermost parent row");
+  h.find("cfv-ref").fire("click");
+  assert.equal(picked[2][0], values[1]);
+  h.findAll("cfv-mrow")[1].fire("click");
+  assert.equal(picked[3][0].className, "example.EntitlementClient", "a nested method shows its own evidence");
+  assert.equal(picked[3][0].category, "methods");
+  assert.equal(picked[3][0].service, "cb-app");
+  assert.equal(picked[3][1], values[5], "the list row is the outermost parent");
   stop();
   assert.equal(h.listeners(), 0);
+});
+
+test("plain getters and setters fold away, but is/has methods and outermost methods stay visible", () => {
+  const h = fixture();
+  const nested = (name, disposition = "before_only") => ({className: "example.Entity", methodName: name, disposition, beforeCount: 1, afterCount: 0});
+  flow.render(h.container, [{category: "methods", service: "app", className: "example.Entity", methodName: "getId", disposition: "changed",
+    beforeCount: 2, afterCount: 1, nestedChanges: [nested("getValue"), nested("setValue"), nested("isGrandfatheringEnabled"), nested("hasAccess"), nested("getter")]}], {}, {});
+  const folded = h.find("cfv-accessors");
+  assert.match(folded.textContent, /2 plain getters and setters/);
+  assert.match(folded.textContent, /Entity\.getValue.*Entity\.setValue/);
+  assert.equal(folded.open, false);
+  const visible = h.findAll("cfv-mrow").filter(row => !folded.all().includes(row)).map(row => row.textContent);
+  assert.ok(visible.some(value => /Entity\.getId/.test(value)), "an outermost getter is never folded");
+  assert.ok(visible.some(value => /isGrandfatheringEnabled/.test(value)));
+  assert.ok(visible.some(value => /hasAccess/.test(value)));
+  assert.ok(visible.some(value => /Entity\.getter/.test(value)), "only get/set followed by a capital is an accessor");
+});
+
+test("unchanged services shrink to one line after the services that differ; differing-inside services stay full", () => {
+  const h = fixture(), picked = [];
+  const values = [
+    {category: "outcomes", service: "quiet", method: "GET", path: "/plans", disposition: "unchanged", before: [{httpStatus: 200}], after: [{httpStatus: 200}]},
+    call("quiet", "db", "unchanged", 3, 3),
+    {category: "outcomes", service: "busy", method: "GET", path: "/items", disposition: "unchanged", before: [{httpStatus: 200}], after: [{httpStatus: 200}]},
+    call("busy", "cache", "before_only", 1, 0)];
+  flow.render(h.container, values, {}, {onSelect: row => picked.push(row)});
+  assert.deepEqual(h.findAll("cfv-block").map(block => block.find ? "" : block.textContent.split(" ")[0]), ["busy"]);
+  const compact = h.find("cfv-srow");
+  assert.match(compact.textContent, /quiet.*GET \/plans · HTTP 200 in both · 1 call unchanged.*Unchanged/);
+  const graph = h.find("cfv-graph").childNodes;
+  assert.ok(graph.indexOf(compact) > graph.indexOf(h.find("cfv-block")), "unchanged services come last");
+  compact.fire("click");
+  assert.equal(picked[0], values[0], "the one-line row still fills the panel");
 });
 
 test("an empty comparison explains that nothing can be drawn", () => {
   const h = fixture();
   flow.render(h.container, [], {}, {});
   assert.match(h.container.textContent, /No service evidence was returned/);
-  assert.equal(h.findAll("tcf-block").length, 0);
+  assert.equal(h.findAll("cfv-block").length, 0);
 });
 
 test("large comparisons are capped with a visible note", () => {
@@ -136,7 +188,7 @@ test("large comparisons are capped with a visible note", () => {
   assert.equal(model.servicesOmitted, 4);
   const h = fixture();
   flow.render(h.container, Array.from({length: 15}, (_, index) => call("app", "host" + index, "changed", 1, 2)), {}, {});
-  assert.equal(h.findAll("tcf-call").length, 12);
+  assert.equal(h.findAll("cfv-call").length, 12);
   assert.match(h.container.textContent, /3 more differing calls/);
 });
 
@@ -147,6 +199,7 @@ function comparison() {
     methods: {...group}, dependencies: {...group}, outcomes: {...group}, exceptions: {...group}, lines: {...group}, nesting: {...group},
     warnings: [], limitations: [], limited: false, durationSamples: {before: [], after: []},
     evidenceWarnings: {before: {warnings: [], segments: []}, after: {warnings: [], segments: []}},
+    sourceSnapshots: {before: {snapshotId: "a"}, after: {snapshotId: "b"}},
     behavior: {schemaVersion: 1, limited: false, omitted: {}, warnings: [],
       outcomes: [{service: "cb-app", method: "POST", path: "/subscriptions", disposition: "changed",
         before: [{...ref, httpStatus: 404}], after: [{...ref, snapshotId: "b", httpStatus: 200}]}],
@@ -154,90 +207,122 @@ function comparison() {
         disposition: "before_only", before: {count: 1, statuses: [], evidence: []}, after: {count: 0, statuses: [], evidence: []}}],
       methods: []}};
 }
-
-test("the comparison offers the flow view only when its script is loaded, and draws it on first open", () => {
-  const without = fixture();
-  tools.renderComparison(without.container, comparison());
-  assert.equal(without.find("tct-flow"), null);
-  assert.ok(without.find("tct-behavior-dependencies"), "list view is unaffected");
-
+function withFlow(run) {
   globalThis.TraceLensCompareFlow = flow;
-  try {
-    const h = fixture();
-    const stop = tools.renderComparison(h.container, comparison());
-    const details = h.find("tct-flow");
-    assert.equal(h.find("tcf"), null, "nothing is drawn while the flow view is closed");
-    details.open = true; details.fire("toggle");
-    assert.match(h.find("tcf").textContent, /GET ems\.local/);
-    h.findAll("tcf-call")[0].fire("click");
-    assert.match(h.find("tct-focus-label").textContent, /Focused difference: cb-app · GET · ems\.local/);
-    assert.equal(h.find("tct-behavior-outcomes"), null, "the list narrows to the selected node");
-    assert.ok(h.find("tct-behavior-dependencies"));
-    stop();
-    assert.equal(h.listeners(), 0);
-  } finally { delete globalThis.TraceLensCompareFlow; }
+  try { run(); } finally { delete globalThis.TraceLensCompareFlow; }
+}
+
+test("without the flow script the list view is unchanged", () => {
+  const h = fixture();
+  tools.renderComparison(h.container, comparison());
+  assert.equal(h.find("tct-flow"), null);
+  assert.ok(h.find("tct-behavior-dependencies"));
 });
 
-test("selecting a node whose row is unchanged opens the common context so the row is visible", () => {
-  globalThis.TraceLensCompareFlow = flow;
-  try {
-    const h = fixture(), value = comparison();
-    value.behavior.outcomes[0].disposition = "unchanged";
-    const stop = tools.renderComparison(h.container, value);
-    assert.equal(h.find("tct-common-context").open, false, "common context starts collapsed");
-    const details = h.find("tct-flow"); details.open = true; details.fire("toggle");
-    h.find("tcf-service").fire("click");
-    const common = h.find("tct-common-context");
-    assert.equal(common.open, true);
-    assert.match(common.textContent, /POST \/subscriptions/);
-    assert.doesNotMatch(h.find("tct-behavior-rows").textContent, /No behavior differences/);
-    stop();
-  } finally { delete globalThis.TraceLensCompareFlow; }
-});
+test("the flow view opens by default when anything differs, with the most important difference in the panel", () => withFlow(() => {
+  const h = fixture();
+  const stop = tools.renderComparison(h.container, comparison());
+  assert.equal(h.find("tct-flow").open, true);
+  const panel = h.find("tct-flow-panel");
+  assert.ok(h.find("cfv-layout").childNodes.includes(panel), "the panel sits in the flow layout");
+  assert.match(panel.textContent, /Selected.*POST \/subscriptions.*HTTP 404.*HTTP 200.*Show in list/, "an HTTP error outranks other differences");
+  assert.equal(h.find("cfv-service").getAttribute("aria-pressed"), "true");
+  stop();
+  assert.equal(h.listeners(), 0);
+}));
+
+test("the flow view stays closed and undrawn when nothing differs", () => withFlow(() => {
+  const h = fixture(), value = comparison();
+  value.behavior.outcomes[0].disposition = "unchanged"; value.behavior.dependencies[0].disposition = "unchanged";
+  tools.renderComparison(h.container, value);
+  const details = h.find("tct-flow");
+  assert.equal(details.open, false);
+  assert.equal(h.find("cfv"), null, "nothing is drawn while the flow view is closed");
+  details.open = true; details.fire("toggle");
+  assert.match(h.find("cfv-headline").textContent, /No differences/);
+}));
+
+test("selecting a node fills the panel without narrowing or scrolling the list; Show in list narrows it", () => withFlow(() => {
+  const h = fixture();
+  const stop = tools.renderComparison(h.container, comparison());
+  h.findAll("cfv-call")[0].fire("click");
+  assert.match(h.find("tct-flow-panel").textContent, /GET · ems\.local · \/entitlements.*1 recorded call.*Not observed in this capture/);
+  assert.equal(h.find("tct-focus-bar").hidden, true, "the list is not narrowed by a graph click");
+  assert.ok(h.find("tct-behavior-outcomes"));
+  h.find("tct-flow-show-in-list").fire("click");
+  assert.match(h.find("tct-focus-label").textContent, /Focused difference: cb-app · GET · ems\.local/);
+  assert.equal(h.find("tct-behavior-outcomes"), null);
+  h.find("tct-clear-focus").fire("click");
+  assert.equal(h.findAll("cfv-call")[0].getAttribute("aria-pressed"), "true", "clearing the list focus keeps the graph selection");
+  stop();
+}));
+
+test("panel evidence buttons keep working after the list redraws", () => withFlow(() => {
+  const h = fixture(), opened = [];
+  const stop = tools.renderComparison(h.container, comparison(), {onOpenEvidence: async ref => { opened.push(ref); }});
+  const panel = h.find("tct-flow-panel");
+  const button = () => panel.all().find(node => node.classList.contains("tct-open-evidence"));
+  assert.ok(button(), "the preselected outcome offers its saved evidence");
+  const search = h.find("tct-pair-search"); search.value = "ems"; search.fire("input");
+  search.value = ""; search.fire("input");
+  button().fire("click");
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].snapshotId, "a");
+  stop();
+  assert.equal(h.listeners(), 0);
+}));
+
+test("Show in list on an unchanged row opens the common context so the row is visible", () => withFlow(() => {
+  const h = fixture(), value = comparison();
+  value.behavior.outcomes[0].disposition = "unchanged";
+  const stop = tools.renderComparison(h.container, value);
+  assert.equal(h.find("tct-common-context").open, false, "common context starts collapsed");
+  h.find("cfv-service").fire("click");
+  h.find("tct-flow-show-in-list").fire("click");
+  const common = h.find("tct-common-context");
+  assert.equal(common.open, true);
+  assert.match(common.textContent, /POST \/subscriptions/);
+  assert.doesNotMatch(h.find("tct-behavior-rows").textContent, /No behavior differences/);
+  stop();
+}));
+
+test("Show in list for a nested method focuses its outermost parent row", () => withFlow(() => {
+  const h = fixture(), value = comparison();
+  value.behavior.methods = [{service: "cb-app", className: "example.Guard", methodName: "check", disposition: "descendants_changed", beforeCount: 1, afterCount: 1,
+    before: [], after: [], nestedChanges: [{className: "example.Client", methodName: "fetch", disposition: "before_only", beforeCount: 1, afterCount: 0}]}];
+  const stop = tools.renderComparison(h.container, value);
+  h.findAll("cfv-mrow")[1].fire("click");
+  assert.match(h.find("tct-flow-panel").textContent, /example\.Client\.fetch/);
+  h.find("tct-flow-show-in-list").fire("click");
+  assert.match(h.find("tct-focus-label").textContent, /example\.Guard\.check/);
+  assert.ok(h.find("tct-behavior-methods"));
+  stop();
+}));
 
 test("calls without a recorded destination are named by their system", () => {
   const h = fixture();
   flow.render(h.container, [{category: "dependencies", service: "cb-ems", boundaryKind: "cache", system: "redis", operation: "set",
     destination: null, path: null, disposition: "before_only", before: {count: 1}, after: {count: 0}},
   {category: "dependencies", service: "cb-ems", boundaryKind: "queue", disposition: "changed", before: {count: 1}, after: {count: 2}}], {}, {});
-  const titles = h.findAll("tcf-title").map(node => node.textContent);
+  const titles = h.findAll("cfv-title").map(node => node.textContent);
   assert.ok(titles.includes("redis set"));
   assert.ok(titles.includes("queue"));
 });
 
-test("the highlighted node follows a focus that is set or cleared in the list", () => {
-  globalThis.TraceLensCompareFlow = flow;
-  try {
-    const h = fixture();
-    const stop = tools.renderComparison(h.container, comparison());
-    const details = h.find("tct-flow"); details.open = true; details.fire("toggle");
-    const callNode = h.findAll("tcf-call")[0], service = h.find("tcf-service");
-    callNode.fire("click");
-    assert.equal(callNode.getAttribute("aria-pressed"), "true");
-    h.find("tct-clear-focus").fire("click");
-    assert.equal(callNode.getAttribute("aria-pressed"), "false", "Show all changes clears the highlight");
-    h.findAll("tct-inspect-difference")[0].fire("click");
-    assert.equal(service.getAttribute("aria-pressed"), "true", "Inspect difference highlights the matching node");
-    stop();
-  } finally { delete globalThis.TraceLensCompareFlow; }
-});
-
-test("a selected nested method keeps its own highlight when its parent row is focused", () => {
-  const h = fixture(), values = rows();
-  const view = flow.render(h.container, values, {}, {});
-  const nodes = h.findAll("tcf-method-node");
-  nodes[1].fire("click");
+test("select highlights a row's node without reporting a selection", () => {
+  const h = fixture(), values = rows(), picked = [];
+  const view = flow.render(h.container, values, {}, {onSelect: row => picked.push(row)});
   view.select(values[5]);
-  assert.equal(nodes[1].getAttribute("aria-pressed"), "true");
-  assert.equal(nodes[0].getAttribute("aria-pressed"), "false");
+  assert.equal(h.findAll("cfv-mrow")[0].getAttribute("aria-pressed"), "true");
   view.select(null);
-  assert.equal(nodes[1].getAttribute("aria-pressed"), "false");
+  assert.equal(h.findAll("cfv-mrow")[0].getAttribute("aria-pressed"), "false");
+  assert.equal(picked.length, 0);
 });
 
-test("focusing a downstream service highlights its own node, not the reference beside the call", () => {
+test("selecting a downstream service highlights its own node, not the reference beside the call", () => {
   const h = fixture(), values = rows();
   const view = flow.render(h.container, values, {}, {});
   view.select(values[1]);
-  assert.equal(h.findAll("tcf-service")[1].getAttribute("aria-pressed"), "true");
-  assert.equal(h.find("tcf-ref").getAttribute("aria-pressed"), "false");
+  assert.equal(h.findAll("cfv-service")[1].getAttribute("aria-pressed"), "true");
+  assert.equal(h.find("cfv-ref").getAttribute("aria-pressed"), "false");
 });

@@ -253,20 +253,40 @@
     });
     review.append(findings);
     const flowApi = (typeof globalThis !== "undefined" ? globalThis : {}).TraceLensCompareFlow;
-    let disposeFlow = () => {};
+    let disposeFlow = () => {}, openFlow = () => {};
+    // The panel owns its listeners: draw() clears rowListeners, which must not disable panel buttons.
+    const flowPanelListeners = [];
     if (flowApi && typeof flowApi.render === "function") {
       const flow = el(doc, "details", "tct-flow"), flowBody = el(doc, "div", "tct-flow-body");
+      const panel = el(doc, "aside", "tct-flow-panel");
+      panel.setAttribute("aria-label", "Selected difference"); panel.setAttribute("aria-live", "polite");
       flow.append(el(doc, "summary", "", "Flow view · services, calls and methods"), flowBody);
-      let drawn = false;
-      listen(flow, "toggle", () => {
-        if (!flow.open || drawn || disposed) return;
-        drawn = true;
-        disposeFlow = flowApi.render(flowBody, rows, {limited: Boolean(behavior.limited || value.limited)}, {onSelect: row => {
-          search.value = ""; clearPairSearch(); focusedRow = row; draw();
+      const showInPanel = (row, listRow) => {
+        flowPanelListeners.splice(0).forEach(remove => remove());
+        if (!row) { panel.replaceChildren(el(doc, "p", "tct-muted", "Select a service, call or method to see it before and after.")); return; }
+        const showInList = el(doc, "button", "tct-flow-show-in-list", "Show in list"); showInList.type = "button";
+        listen(showInList, "click", () => {
+          search.value = ""; clearPairSearch(); focusedRow = listRow || row; draw();
           const selected = body.querySelector(".tct-behavior-row");
-          if (selected && typeof selected.scrollIntoView === "function") selected.scrollIntoView({block: "nearest"});
-        }});
-      });
+          if (selected) { selected.focus(); if (typeof selected.scrollIntoView === "function") selected.scrollIntoView({block: "nearest"}); }
+        }, flowPanelListeners);
+        panel.replaceChildren(el(doc, "span", "tct-finding-label", "Selected"), pairRow(row, true, flowPanelListeners), showInList);
+      };
+      let drawn = false;
+      const drawFlow = () => {
+        if (drawn || disposed) return;
+        drawn = true;
+        showInPanel(null);
+        disposeFlow = flowApi.render(flowBody, rows, {limited: Boolean(behavior.limited || value.limited)}, {panel, onSelect: showInPanel});
+      };
+      listen(flow, "toggle", () => { if (flow.open) drawFlow(); });
+      // Open by default when anything differs, preselecting the most important difference.
+      const firstDifference = rows.filter(row => row.disposition !== "unchanged").sort((a, b) => findingPriority(b) - findingPriority(a))[0];
+      if (firstDifference) openFlow = () => {
+        flow.open = true; drawFlow();
+        showInPanel(firstDifference);
+        if (typeof disposeFlow.select === "function") disposeFlow.select(firstDifference);
+      };
       review.append(flow);
     }
     const quality = el(doc, "details", "tct-quality");
@@ -330,7 +350,7 @@
         return [selected];
       });
     }
-    function sideCell(row, side) {
+    function sideCell(row, side, collection = rowListeners) {
       const cell = el(doc, "div", `tct-evidence-cell tct-evidence-${side}`);
       cell.append(el(doc, "span", "tct-side-label", side === "before" ? "Before" : "After"), el(doc, "strong", "", behaviorSide(row, side)));
       if (row.category === "dependencies" && row[side] && Array.isArray(row[side].statuses)) {
@@ -359,13 +379,13 @@
             } catch (error) {
               if (isCurrent()) navigationStatus.textContent = text(error && error.message) || "The exact saved evidence could not be opened. No other service was substituted.";
             } finally { if (!disposed) button.disabled = false; }
-          }, rowListeners);
+          }, collection);
           cell.append(button);
         });
       }
       return cell;
     }
-    function pairRow(row, nested) {
+    function pairRow(row, nested, collection = rowListeners) {
       const item = el(doc, "article", `tct-behavior-row tct-disposition-${row.disposition}`);
       item.tabIndex = -1;
       const title = el(doc, "div", "tct-row-heading");
@@ -378,7 +398,7 @@
         title.append(address);
       }
       item.append(title);
-      const cells = el(doc, "div", "tct-evidence-pair"); cells.append(sideCell(row, "before"), sideCell(row, "after")); item.append(cells);
+      const cells = el(doc, "div", "tct-evidence-pair"); cells.append(sideCell(row, "before", collection), sideCell(row, "after", collection)); item.append(cells);
       if (!nested && row.category === "methods") {
         const children = nestedMethodChanges(row), originalCount = Array.isArray(row.nestedChanges) ? row.nestedChanges.length : 0;
         const omitted = Math.max(number(row.nestedOmitted), number(row.nestedChangedCount) - originalCount) + Math.max(0, originalCount - children.length);
@@ -418,7 +438,6 @@
       clearRows(); body.replaceChildren();
       const query = search.value.trim().slice(0, 128).toLowerCase();
       focusBar.hidden = !focusedRow;
-      if (typeof disposeFlow.select === "function") disposeFlow.select(focusedRow);
       focusLabel.textContent = focusedRow ? `Focused difference: ${text(focusedRow.service)} · ${behaviorIdentity(focusedRow)}` : "";
       const matching = rows.filter(row => (!focusedRow || row === focusedRow) && (matchesBehavior(row, query) || nestedMethodChanges(row).some(child => matchesBehavior(child, query))));
       const changes = matching.filter(row => row.disposition !== "unchanged"), common = matching.filter(row => row.disposition === "unchanged");
@@ -517,8 +536,8 @@
     const advanced = el(doc, "details", "tct-all-differences");
     advanced.append(el(doc, "summary", "", "All differences · counts, lines & raw identities"));
     const raw = el(doc, "div", "tct-raw-comparison"); renderRawComparison(raw, value, true); advanced.append(raw);
-    container.replaceChildren(review, advanced); draw();
-    return () => { disposed = true; pairSearchGeneration++; disposeFlow(); clearRows(); pairSearchListeners.splice(0).forEach(remove => remove()); listeners.splice(0).forEach(remove => remove()); };
+    container.replaceChildren(review, advanced); draw(); openFlow();
+    return () => { disposed = true; pairSearchGeneration++; disposeFlow(); flowPanelListeners.splice(0).forEach(remove => remove()); clearRows(); pairSearchListeners.splice(0).forEach(remove => remove()); listeners.splice(0).forEach(remove => remove()); };
   }
 
   // options.api(path, method, body) is the host's bounded same-origin JSON API.
