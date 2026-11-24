@@ -107,9 +107,13 @@ Create a trusted local registry, using absolute source paths appropriate to your
 }
 ```
 
-[The checked-in registry](../scripts/services-local.json) is a workstation-specific
-template; copy it to your local `services.json` and replace the absolute source
-paths before using the commands below. Service names and upstream URLs must each
+[The checked-in registry](../scripts/services-local.json) works as it is when your
+checkouts are at `~/work/chargebee-app` and `~/work/cb-ems`, the same layout guided
+setup assumes. A leading `~/` in a service's `sourceRoot` resolves under your home
+directory; nothing else is expanded, and other paths must be absolute. If a checkout
+is somewhere else, copy the file and change that path. A missing checkout does not
+stop the viewer: it starts, prints a `Source note` naming the service, and shows that
+service without source lines. Service names and upstream URLs must each
 be unique. A registry name is a local viewer/MCP alias, not an override of the
 agent's `applicationId`; the bundled names deliberately match the agent configs.
 Separate instances can use separate names and debug URLs. Source roots are selected

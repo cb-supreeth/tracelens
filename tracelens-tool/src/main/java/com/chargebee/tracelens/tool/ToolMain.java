@@ -17,6 +17,15 @@ import java.util.Set;
 /** Java 8 entrypoint shared by the viewer, command line and stdio MCP server. */
 public final class ToolMain {
     public static final String VERSION = "0.1.1-SNAPSHOT";
+    /** A missing checkout must not stop the viewer; say which service will show no source and why. */
+    static java.util.List<String> missingSourceRoots(ToolConfig config) {
+        java.util.List<String> notes = new java.util.ArrayList<>();
+        if (config.federated) for (Service service : config.services)
+            if (service.sourceRoot != null && !java.nio.file.Files.isDirectory(java.nio.file.Paths.get(service.sourceRoot)))
+                notes.add("Source note: " + service.name + " source root " + service.sourceRoot
+                        + " was not found, so its source lines are not shown. Set sourceRoot for " + service.name + " in the services file.");
+        return notes;
+    }
     static final String SHARED_STORE_WARNING = "Storage note: do not run Python and Java writers against the same capture/snapshot directories; "
             + "stop Python writers or choose separate --capture-dir/--snapshot-dir.";
     private ToolMain() {}
@@ -89,6 +98,7 @@ public final class ToolMain {
             server.start();
             err.println("TraceLens viewer: http://127.0.0.1:" + server.port() + "/");
             err.println(SHARED_STORE_WARNING);
+            for (String note : missingSourceRoots(config)) err.println(note);
             server.await();
             return 0;
         }

@@ -32,6 +32,10 @@ public final class Service {
                 (u.getPort()<0?("https".equalsIgnoreCase(u.getScheme())?443:80):u.getPort())+"|"+u.getRawPath().replaceAll("/+$","");}
         catch(Exception e){throw new IllegalArgumentException("invalid upstream URL",e);}
     }
+    /** Lets a shared registry say "~/work/repo"; only a leading "~/" is expanded, nothing else. */
+    static String expandHome(String root){
+        return root!=null&&root.startsWith("~/")?Paths.get(System.getProperty("user.home")).resolve(root.substring(2)).toString():root;
+    }
     public static List<Service> load(Path path) {
         try {
             if(Files.size(path)>65536)throw new IllegalArgumentException("services config exceeds 64 KiB");
@@ -40,7 +44,7 @@ public final class Service {
             List<Service> result=new ArrayList<>();Set<String>names=new HashSet<>(),urls=new HashSet<>();
             for(JsonNode row:rows){
                 if(!row.isObject())throw new IllegalArgumentException("each service must be an object");
-                String name=Json.text(row,"name"),url=Json.text(row,"url"),root=Json.text(row,"sourceRoot");
+                String name=Json.text(row,"name"),url=Json.text(row,"url"),root=expandHome(Json.text(row,"sourceRoot"));
                 if(name==null||!name.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,63}"))throw new IllegalArgumentException("service name must be 1–64 letters, digits, dots, underscores or hyphens");
                 if(!names.add(name))throw new IllegalArgumentException("duplicate service name: "+name);
                 if(url==null||url.length()>2048||url.codePoints().anyMatch(c->Character.isWhitespace(c)||c<32))throw new IllegalArgumentException("invalid URL for "+name);
