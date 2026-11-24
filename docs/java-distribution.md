@@ -232,11 +232,13 @@ sharing query evidence.
 | `viewerUrl` | Optional HTTP(S) origin used in MCP graph links; no credentials, path, query, or fragment. It does not start the viewer. |
 | `captureDir` | Optional absolute private directory for minimized CLI/MCP captures. Default: `~/.tracelens/captures`. |
 | `snapshotDir` | Optional absolute private root for viewer snapshots. Default: `~/.tracelens/viewer-snapshots`, with a configuration-specific namespace beneath it. |
-| `namespace` | Optional explicit snapshot namespace: 64 lowercase hexadecimal characters. Managed extensions preserve the previous namespace here; without it, the viewer derives one from its mode and service mappings. |
+| `namespace` | Optional explicit snapshot namespace: 64 lowercase hexadecimal characters. Managed extensions preserve the previous namespace here; without it, the viewer derives one from its mode and service mappings. Snapshots saved under other namespaces are reported in **Saved captures** and can be copied in; see [saved evidence workflows](developer-workflow.md). |
 | `services` | Optional bounded service registry, replacing the one-service mapping. Each entry has `name`, `url`, and optional `sourceRoot`/`dependencyAliases`. |
 
 JSON values are literal: `~`, `$HOME`, and other environment variables are not
 expanded in `viewer.sourceRoot`, `viewer.captureDir`, or `viewer.snapshotDir`.
+The one exception is a `--services` registry file, where a leading `~/` in a
+service's `sourceRoot` resolves under the home directory so one file can be shared.
 Use real absolute paths, not symlink aliases, for saved-evidence storage.
 See [Java capture storage](java-capture-storage.md) for filesystem requirements.
 

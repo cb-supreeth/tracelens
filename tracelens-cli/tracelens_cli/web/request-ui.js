@@ -75,6 +75,58 @@
       this.render();
       if (this.mode === "errors") this.run(() => this.refreshErrors());
     }
+    // Saved snapshots are filed per service configuration. When the configuration changes the list
+    // starts empty, so say that earlier snapshots exist and offer an explicit copy.
+    renderEarlier() {
+      const box = $("earlier-snapshots");
+      if (!box) return;
+      const total = this.mode === "pins" && this.earlierSummary ? count(this.earlierSummary.snapshotCount) : 0;
+      box.replaceChildren();
+      box.classList.toggle("hidden", !total);
+      if (!total) return;
+      box.append(el("strong", `${quantity(total, "snapshot")} saved under ${count(this.earlierSummary.configurations) === 1 ? "an earlier viewer configuration" : "earlier viewer configurations"}`),
+        el("p", "Saved captures are filed per service configuration. A changed service URL, service list or source path starts a new list. Nothing was deleted."));
+      if (!this.earlier) {
+        // The full report reads those folders, so it loads only when asked for.
+        const show = button("Show earlier snapshots", () => {
+          show.disabled = true;
+          this.run(async () => {
+            try {
+              this.earlier = await this.viewerStore.otherConfigurations();
+              if (!this.earlier) this.message("This viewer cannot list earlier snapshots. Restart it with the latest version.", true);
+              this.renderEarlier();
+            } finally { show.disabled = false; }
+          });
+        });
+        box.append(show);
+        return;
+      }
+      const groups = (Array.isArray(this.earlier.configurations) ? this.earlier.configurations : [])
+        .filter(group => group && /^[0-9a-f]{64}$/.test(group.namespace) && Array.isArray(group.snapshots) && group.snapshots.length);
+      for (const group of groups) {
+        const details = el("details"), list = el("ul");
+        details.open = groups.length === 1;
+        details.append(el("summary", `${quantity(group.snapshots.length, "snapshot")} · last saved ${date(group.latestSavedAt)}`));
+        for (const row of group.snapshots.slice(0, 40)) list.append(el("li", `${typeof row.name === "string" ? row.name : "Unnamed snapshot"}${row.large ? " · large" : ""}`));
+        const copy = button("Copy into this configuration", () => {
+          copy.disabled = true;
+          this.run(async () => {
+            try {
+              const result = await this.viewerStore.copyFrom(group.namespace);
+              const copied = Array.isArray(result.copied) ? result.copied.length : 0, skipped = Array.isArray(result.skipped) ? result.skipped : [];
+              const reasons = [...new Set(skipped.map(row => row && typeof row.reason === "string" ? row.reason : "").filter(Boolean))].slice(0, 3);
+              this.message(`${quantity(copied, "snapshot")} copied. The originals were left in place.${skipped.length ? ` ${skipped.length} not copied: ${reasons.join(" ")}` : ""}`, copied === 0 && skipped.length > 0);
+              await this.refreshStored();
+            } finally { copy.disabled = false; }
+          });
+        });
+        details.append(list, copy);
+        box.append(details);
+      }
+      if (!groups.length) box.append(el("p", "Those snapshots could not be read."));
+      if (this.earlier.omittedConfigurations) box.append(el("p", `${quantity(this.earlier.omittedConfigurations, "older configuration")} not listed.`));
+      for (const warning of (Array.isArray(this.earlier.warnings) ? this.earlier.warnings : []).slice(0, 3)) if (typeof warning === "string") box.append(el("p", warning, "warn"));
+    }
     async refreshStored() {
       const [views, local, files] = await Promise.allSettled([
         this.store ? this.store.listViews() : Promise.resolve([]),
@@ -82,6 +134,7 @@
       this.views = views.status === "fulfilled" ? views.value : [];
       const browserPins = local.status === "fulfilled" ? local.value.map(pin => ({...pin, storage: "browser"})) : [];
       this.viewerReady = files.status === "fulfilled";
+      this.earlierSummary = this.viewerReady && files.value.earlier && typeof files.value.earlier === "object" ? files.value.earlier : null;
       this.pins = [...(this.viewerReady ? files.value.snapshots.map(pin => ({...pin, storage: "viewer"})) : []), ...browserPins]
         .sort((a, b) => (b.savedAt || b.capturedAt || 0) - (a.savedAt || a.capturedAt || 0));
       const problems = [views, local, files].filter(result => result.status === "rejected").map(result => result.reason.message);
@@ -708,8 +761,9 @@
         }
         $("results-summary").textContent = `${this.pins.filter(pin => pin.storage === "viewer").length} viewer files · ${this.pins.filter(pin => pin.storage !== "viewer").length} browser-only pins · live filters do not hide saved captures`;
         $("empty").textContent = "No saved captures. Find a live request and choose Save snapshot.";
-        $("empty").classList.toggle("hidden", this.pins.length !== 0); return;
+        $("empty").classList.toggle("hidden", this.pins.length !== 0); this.renderEarlier(); return;
       }
+      this.renderEarlier();
       const invalid = !!this.durationProblem();
       const jobs = this.mode === "jobs";
       // Partition whole requests, never individual segments: a job's downstream

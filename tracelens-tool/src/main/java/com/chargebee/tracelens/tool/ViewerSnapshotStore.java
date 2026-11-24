@@ -69,6 +69,93 @@ public final class ViewerSnapshotStore extends CaptureStore {
         ArrayNode warnings=usage[0]>0?arr("Interrupted snapshot files count toward quota; review them manually. No files were automatically deleted."):arr();for(JsonNode warning:large.path("warnings"))warnings.add(warning);
         return obj("snapshots",records,"count",records.size(),"limits",limits(),"chunkedLimits",large.get("limits"),"totalBytes",usage[1]+large.path("totalBytes").asLong(),"warnings",warnings);
     }
+    private static Set<String> entries(Path dir,String pattern){
+        Set<String> names=new HashSet<>();
+        try(DirectoryStream<Path> stream=Files.newDirectoryStream(dir)){for(Path path:stream){String name=path.getFileName().toString();if(name.matches(pattern))names.add(name.substring(0,36));}}
+        catch(java.io.IOException|SecurityException ignored){}
+        return names;
+    }
+    /** IDs already in this namespace: its own files, plus the source IDs of large snapshots copied in. */
+    private Set<String> presentIds(){
+        Set<String> ids=entries(root,Captures.UUID_RE+"\\.json");
+        try{for(String id:largeIds(this)){String source=Captures.text(chunked.get(id),"sourceSnapshotId");if(source!=null)ids.add(source);}}catch(RuntimeException ignored){}
+        return ids;
+    }
+    /** How many snapshots sit under other namespaces, from file names alone; cheap enough for every listing. */
+    public ObjectNode earlierSummary(){
+        int configurations=0,total=0;Set<String> here=null;
+        try(DirectoryStream<Path> stream=Files.newDirectoryStream(root.getParent())){
+            for(Path path:stream){
+                if(!path.getFileName().toString().matches("[0-9a-f]{64}")||path.equals(root)||!Files.isDirectory(path,LinkOption.NOFOLLOW_LINKS))continue;
+                Set<String> ids=entries(path,Captures.UUID_RE+"\\.json");ids.addAll(entries(path.resolve("chunked-v2"),Captures.UUID_RE));
+                if(ids.isEmpty())continue;
+                if(here==null)here=presentIds();
+                ids.removeAll(here);int count=ids.size();
+                if(count>0){configurations++;total+=count;}
+            }
+        }catch(java.io.IOException|SecurityException ignored){}
+        return obj("snapshotCount",total,"configurations",configurations);
+    }
+    /** Sibling namespaces to report; each is read fully, so the scan is bounded. */
+    static final int MAX_OTHER_CONFIGURATIONS=8;
+    private static Set<String> largeIds(ViewerSnapshotStore store){Set<String> ids=new HashSet<>();for(JsonNode row:store.chunked.list().path("snapshots"))ids.add(Captures.text(row,"id"));return ids;}
+    /**
+     * Snapshots saved under other namespaces of the same directory. A namespace is a hash of the
+     * service mappings, so a changed port, service list or checkout path starts a new, empty one;
+     * this read-only report lets the viewer say where the earlier snapshots are. Snapshots that
+     * are already in this namespace are left out, so the report empties once everything is copied.
+     */
+    public ObjectNode otherConfigurations(){
+        Path base=root.getParent();List<String> namespaces=new ArrayList<>();List<ObjectNode> groups=new ArrayList<>();ArrayNode warnings=arr();
+        try(DirectoryStream<Path> stream=Files.newDirectoryStream(base)){
+            for(Path path:stream){String name=path.getFileName().toString();if(name.matches("[0-9a-f]{64}")&&!path.equals(root)&&Files.isDirectory(path,LinkOption.NOFOLLOW_LINKS))namespaces.add(name);}
+        }catch(NoSuchFileException e){return obj("configurations",arr(),"snapshotCount",0,"omittedConfigurations",0,"warnings",warnings);}
+        catch(java.io.IOException|SecurityException e){return obj("configurations",arr(),"snapshotCount",0,"omittedConfigurations",0,"warnings",arr("Earlier snapshot folders could not be read."));}
+        Collections.sort(namespaces);int total=0,unreadable=0;Set<String> here=namespaces.isEmpty()?Collections.<String>emptySet():presentIds();
+        for(String namespace:namespaces){
+            try{
+                ViewerSnapshotStore other=new ViewerSnapshotStore(base,namespace);Set<String> large=largeIds(other);ArrayNode rows=arr();double latest=0;
+                for(JsonNode row:other.list().path("snapshots")){if(here.contains(Captures.text(row,"id")))continue;latest=Math.max(latest,row.path("savedAt").asDouble());rows.add(obj("id",row.get("id"),"name",row.get("name"),"savedAt",row.get("savedAt"),"large",large.contains(Captures.text(row,"id"))));}
+                if(rows.size()>0){groups.add(obj("namespace",namespace,"count",rows.size(),"latestSavedAt",latest,"snapshots",rows));total+=rows.size();}
+            }catch(RuntimeException e){unreadable++;}
+        }
+        if(unreadable>0)warnings.add(unreadable+" earlier snapshot "+(unreadable==1?"folder":"folders")+" could not be read and "+(unreadable==1?"was":"were")+" skipped. No files were changed.");
+        groups.sort(Comparator.comparingDouble((ObjectNode group)->group.path("latestSavedAt").asDouble()).reversed());
+        int omitted=Math.max(0,groups.size()-MAX_OTHER_CONFIGURATIONS);ArrayNode shown=arr();for(ObjectNode group:groups.subList(0,groups.size()-omitted))shown.add(group);
+        return obj("configurations",shown,"snapshotCount",total,"omittedConfigurations",omitted,"warnings",warnings);
+    }
+    /**
+     * Copies another namespace's snapshots into this one. The source is only read; nothing is
+     * overwritten here, and this store's own count and byte limits decide what fits.
+     */
+    public ObjectNode copyFrom(String namespace){
+        Path base=root.getParent(),source=namespaceRoot(base,namespace);
+        if(source.equals(root))throw Captures.invalid("Those snapshots are already in this configuration.");
+        if(!Files.isDirectory(source,LinkOption.NOFOLLOW_LINKS))throw new ToolException(404,"No snapshots are saved under that configuration.");
+        ViewerSnapshotStore other=new ViewerSnapshotStore(base,namespace);Set<String> large=largeIds(other);
+        Set<String> importedLarge=new HashSet<>();for(String id:largeIds(this))importedLarge.add(Captures.text(chunked.get(id),"sourceSnapshotId"));
+        ArrayNode copied=arr(),skipped=arr();
+        for(JsonNode row:other.list().path("snapshots")){
+            String id=Captures.text(row,"id");ObjectNode entry=obj("id",row.get("id"),"name",row.get("name"));
+            try{
+                if(large.contains(id)){
+                    if(importedLarge.contains(id)){skipped.add(entry.put("reason","Already copied into this configuration."));continue;}
+                    Path archive=Files.createTempFile("tracelens-copy-",".zip");
+                    try{
+                        try(java.io.OutputStream out=Files.newOutputStream(archive)){other.chunked.download(id,out);}
+                        try(java.io.InputStream in=Files.newInputStream(archive)){chunked.importArchive(in);}
+                    }finally{Files.deleteIfExists(archive);}
+                }else{
+                    boolean present;try{locked(false,()->read(id+".json"));present=true;}catch(Missing e){present=false;}
+                    if(present){skipped.add(entry.put("reason","Already in this configuration."));continue;}
+                    ObjectNode doc=other.get(id);validateSnapshot(doc);locked(true,()->{publish(doc,false);return null;});
+                }
+                copied.add(entry);
+            }catch(ToolException e){skipped.add(entry.put("reason",e.getMessage()));}
+            catch(java.io.IOException|RuntimeException e){skipped.add(entry.put("reason","This snapshot could not be copied."));}
+        }
+        return obj("namespace",namespace,"copied",copied,"skipped",skipped);
+    }
     private void validId(String id){if(Captures.match(id,Captures.UUID_RE)==null)throw new ToolException(404,"Snapshot ID must be a canonical UUID, not a file path.");}
     @Override public ObjectNode get(String id){validId(id);try{return locked(false,()->read(id+".json").doc);}catch(Missing e){return chunked.get(id);}}
     ObjectNode projection(String id){ObjectNode doc=get(id);return doc.path("schemaVersion").asInt()==2?chunked.projection(id):doc;}

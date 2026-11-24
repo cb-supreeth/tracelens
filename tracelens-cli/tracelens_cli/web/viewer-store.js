@@ -21,6 +21,17 @@
         if (!doc || !Array.isArray(doc.snapshots)) throw new Error("Viewer snapshot storage is unavailable. Restart the viewer with the latest version.");
         return doc;
       },
+      // Snapshots saved under other service configurations of this viewer. An older viewer has no such route.
+      async otherConfigurations() {
+        try {
+          const doc = await api("/api/snapshots/other-configurations");
+          return doc && Array.isArray(doc.configurations) ? doc : null;
+        } catch (error) { return null; }
+      },
+      copyFrom(namespace) {
+        if (typeof namespace !== "string" || !/^[0-9a-f]{64}$/.test(namespace)) throw new Error("Invalid saved configuration.");
+        return api("/api/snapshots/copy-from", "POST", null, {namespace});
+      },
       getPin(id) { return api(path(id)); },
       savePin(snapshot) { return api("/api/snapshots", "POST", null, {snapshot}); },
       capture(request, name) {

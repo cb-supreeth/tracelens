@@ -130,6 +130,22 @@ never overwrite or automatically evict prior captures. `--revision` is a supplie
 label, not proof of which artifact ran; record uncommitted changes separately.
 Comparison works offline after both captures are saved.
 
+### Snapshots saved under an earlier configuration
+
+Viewer snapshots are filed per service configuration: the folder name is a hash of
+the mode and each service's name, debug URL and source path. Changing a port, adding
+a service or moving a checkout starts a new, empty list. Nothing is deleted when
+that happens.
+
+**Saved captures** then shows "N snapshots saved under earlier viewer
+configurations". **Show earlier snapshots** lists them by name, grouped by
+configuration, and **Copy into this configuration** copies one group in. Copying
+only reads the earlier folder, never overwrites a snapshot already in the current
+list, and stops at the current list's limits (20 snapshots and 20 MiB, plus the
+separate large-snapshot limits), reporting what did not fit. A large snapshot gets a
+new ID when copied. Snapshots already copied are left out of the count, so the notice
+disappears once everything is copied.
+
 ### Compare viewer snapshots and use them with CLI/MCP
 
 For the visual workflow, **Save snapshot** on each request. In **Saved captures**,

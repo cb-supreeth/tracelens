@@ -272,7 +272,9 @@ public final class ViewerServer implements AutoCloseable {
         int status = 200;
         if ("GET".equals(method)) {
             noBody(exchange);
-            result = suffix.isEmpty() ? snapshots.list() : snapshots.get(suffix.substring(1));
+            result = suffix.isEmpty() ? snapshots.list() : "/other-configurations".equals(suffix) ? snapshots.otherConfigurations()
+                    : snapshots.get(suffix.substring(1));
+            if (suffix.isEmpty()) result.set("earlier", snapshots.earlierSummary());
         } else if ("DELETE".equals(method)) {
             noBody(exchange);
             result = snapshots.delete(suffix.substring(1));
@@ -286,6 +288,8 @@ public final class ViewerServer implements AutoCloseable {
                 if (journey.path("segments").size() == 0) throw new ToolException(404, "No retained segment summaries were found; nothing was saved.");
                 ObjectNode request = body.has("request") ? RequestEvidence.summary(body.path("request")) : Json.obj(); request.put("traceId", traceId);
                 result = snapshots.chunked.capture(traceId, Json.text(body, "name"), request, journey, details); status = 201;
+            } else if ("/copy-from".equals(suffix) && fields(body).equals(Collections.singleton("namespace"))) {
+                result = snapshots.copyFrom(Json.text(body, "namespace"));
             } else if (suffix.isEmpty() && fields(body).equals(Collections.singleton("snapshot"))) {
                 result = snapshots.save(body.get("snapshot"));
                 status = 201;

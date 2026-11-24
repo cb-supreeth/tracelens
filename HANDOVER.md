@@ -1,5 +1,58 @@
 # TraceLens handover
 
+## Update 2026-11-24 — Python removal, portable registry, snapshot recovery (model: Fable 5.2)
+
+**Done (three separate changes, uncommitted on branch
+`portable-config-and-snapshot-recovery`):**
+
+1. **Removed the legacy Python implementation.** Deleted the 21 `tracelens_cli`
+   modules (viewer, CLI, MCP), the 30 pytest files and 4 manual fixtures that only
+   exercised them, and the two parity-fixture generators. Kept: the browser assets
+   under `tracelens-cli/tracelens_cli/web` (Gradle bundles them from there), the
+   Node tests, and pytest for the two cb-app bootstrap script tests. Parity fixtures
+   under `tracelens-tool/src/test/resources` stay and are now frozen; recover the
+   generators from git history before this date if one must be regenerated.
+   `help-ui.test.cjs` now asserts packaging against `tracelens-tool/build.gradle`.
+2. **Portable service registry.** `Service.load` expands a leading `~/` in a
+   registry `sourceRoot`; `scripts/services-local.json` uses `~/work/chargebee-app`
+   and `~/work/cb-ems`. `serve` prints a `Source note` per service whose checkout is
+   missing and still starts.
+3. **Snapshot recovery.** `GET /api/snapshots` carries `earlier` (a count from file
+   names only); `GET /api/snapshots/other-configurations` returns names per earlier
+   namespace; `POST /api/snapshots/copy-from {namespace}` copies one namespace in.
+   Saved captures shows the notice, an on-demand list and a copy button.
+
+**Decisions:** (a) `~/` only in registry files, because the registry is the file
+teams share; `viewer.*` keys stay literal. Rejected removing `sourceRoot` from the
+checked-in file (source lines are a headline feature). (b) Report-and-copy over
+changing the namespace hash (would orphan every existing snapshot once) or merging
+all namespaces (saved evidence opens with the current service mapping, so it could
+be attributed to the wrong service). (c) The full report is on demand because
+existing tests guard page load against extra requests and the report reads every
+earlier file. (d) Large snapshots are copied through the existing download and
+import path, so they get a new ID and a `sourceSnapshotId`.
+
+**Verified:** `./gradlew test :tracelens-agent:javaBundle --offline` exit 0;
+`node --test tracelens-cli/tests/*.test.cjs` all pass; `uv run --offline --extra
+test pytest -q` 198 pass (bootstrap script tests). Fresh bundle on port 7791 over a
+copy of `~/.tracelens/setup/viewer-snapshots` with a `~/` registry and one missing
+checkout: viewer started; list reported 49 earlier snapshots in 3 configurations;
+copying `907cb339…` copied 15 (3 large); copying again skipped all 15; copying
+`4b6871ff…` copied 8 and skipped 11 at the 20 limit; malformed, traversal and
+no-Origin requests were rejected; a copied large snapshot opened; the copied
+UBB-4005 pair compared (404 → 200, 27 methods); checksums of all three source
+folders were identical before and after.
+
+**Broken or risky / not verified:** The notice was not seen in a real browser
+(pane cannot open the local viewer); UI behavior is covered by Node tests only.
+No unit test copies a large snapshot (verified on real data only). The copy
+reads a large snapshot through a temp file in the system temp directory. A user
+who never copies sees the notice on Saved captures permanently. The startup
+"Storage note" still mentions Python writers; left in case an old Python install
+shares a store.
+
+**Do not touch:** the copy must stay read-only on the source namespace.
+
 ## Update 2026-11-22 — compare Flow view UX pass (model: Opus 5.5)
 
 **Done:** Five changes to the saved-snapshot Flow view, all viewer-only:
