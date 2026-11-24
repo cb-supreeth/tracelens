@@ -470,9 +470,9 @@ scope or change the agent. Ambiguity and incomplete discovery stop selection.
 
 `DebugClient`, `Federation`, `Renderer` and `Source` read evidence, render call
 trees and resolve observed `FQCN + line` coordinates against a configured local
-checkout—no embeddings or code index are required. The retained
-[legacy reader](../tracelens-cli/tracelens_cli/) and its tests remain technical
-references, not a prerequisite for the Java distribution.
+checkout—no embeddings or code index are required. The earlier Python reader
+was removed on 2026-11-24; its behavior is frozen in the committed parity
+fixtures under `tracelens-tool/src/test/resources`.
 Native request-body/query and ClickHouse capture are separate
 agent opt-ins documented in [request data and native SQL](request-data-and-clickhouse.md).
 The UI exposes Requests, Saved captures, Performance and Services/capture settings.
@@ -606,8 +606,7 @@ The `samples/line-spike` module validates the major mechanics:
 - `SegmentSpikeApp`: root trace and continued SQS-style segment
 
 The repository has Java tests across bridge, core, agent, and starter modules, plus
-Python/browser tests for source rendering, federation, local-server/MCP behavior,
-boundary projections, and saved snapshots. Important seams include load-time
+browser tests for the viewer and pytest checks for the cb-app bootstrap scripts. Important seams include load-time
 lambda weaving, JDK executor retransformation, HTTP/HTTPS propagation safety, and
 SDK-shaped messaging fixtures. Those messaging fixtures make no broker/network
 calls; they verify matching and metadata behavior, not production broker delivery.

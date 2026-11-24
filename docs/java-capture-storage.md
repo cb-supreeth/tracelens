@@ -102,7 +102,7 @@ private.
 
 The Java tool does not stop another writer, change existing permissions, migrate
 files or delete saved evidence at startup. Use one compatible storage protocol
-per directory. If evaluating the legacy Python reader/writer, give it a separate
+per directory. If an older Python `tracelens` install is still on a machine, give it a separate
 private store: its `flock` and Java's `FileChannel` record locks do not provide
 portable mutual exclusion, even with the same `.lock` filename. Copy/import is
 an explicit action; preserve originals and validate permissions.

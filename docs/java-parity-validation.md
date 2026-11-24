@@ -77,10 +77,11 @@ for startup-only overview/methods/detailed configuration.
 
 ## Historical migration baseline — 2026-10-20
 
-Validated on **2026-10-20** against the Python implementation retained in this
-checkout. The Java runtime and its regression suite do not require Python.
-Python is used only by maintainers to regenerate reference fixtures or run the
-reference implementation's own tests.
+Validated on **2026-10-20** against the Python implementation that this checkout
+then retained. That implementation, its tests and the fixture generators were
+removed on 2026-11-24 (recover them from git history before that date if a
+fixture must be regenerated). The Java runtime and its regression suite do not
+require Python; the parity fixtures are committed and frozen.
 
 ## Migration-baseline result — 2026-10-20
 
@@ -122,16 +123,12 @@ overhead benchmark or an application-level replay of every Chargebee API.
 model fields and array ordering, not just whether an operation returned
 success. Numeric values are compared by value across JSON number representations.
 
-Fixtures contain synthetic test data only. Test generators run from the repository
-root using the Python test environment:
+Fixtures contain synthetic test data only. They were produced by two generators
+(`generate_evidence_parity.py`, `generate_workflow_reference.py`) that were removed
+with the Python implementation.
 
-```bash
-tracelens-cli/.venv/bin/python tracelens-tool/src/test/python/generate_evidence_parity.py
-tracelens-cli/.venv/bin/python tracelens-tool/src/test/generate_workflow_reference.py
-```
-
-The evidence generator invokes Python tests with isolated loopback HTTP fixtures.
-It skips non-JSON inputs, tests that temporarily patch production constants, and
+The evidence generator invoked Python tests with isolated loopback HTTP fixtures.
+It skipped non-JSON inputs, tests that temporarily patch production constants, and
 very large golden documents. Dedicated Java tests exercise the actual production
 limits instead: 100,000 events, 512 levels, 64 thread-name lanes, dependency and
 graph limits, 10,000 error summaries, and 32/128 KiB execution model budgets.
@@ -185,7 +182,7 @@ they do not mutate a developer's capture stores or application services.
 node --test tracelens-cli/tests/*.test.cjs
 
 cd tracelens-cli
-.venv/bin/python -m pytest tests -q
+uv run --extra test pytest -q   # cb-app bootstrap script tests only
 ```
 
 The Gradle build uses JDK 21; the smoke tasks also require a locally installed

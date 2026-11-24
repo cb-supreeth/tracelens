@@ -72,7 +72,7 @@ Exporting evidence from the debug API is a separate read operation.
 | Standalone debug API | JDK HTTP server on loopback |
 | Viewer/MCP | Java 8+ tooling, JDK HTTP server, Jackson, stdio MCP |
 | Browser | Plain HTML/CSS/JavaScript and SVG; no frontend framework/chart dependency |
-| Build/tests | Gradle/Shadow, JUnit/AssertJ, pytest and Node's built-in test runner |
+| Build/tests | Gradle/Shadow, JUnit/AssertJ and Node's built-in test runner; pytest for the cb-app bootstrap scripts |
 
 The combined artifact version is `0.1.1-SNAPSHOT`. A version label alone does not
 prove which build an existing JVM is running.

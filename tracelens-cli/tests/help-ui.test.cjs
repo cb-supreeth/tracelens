@@ -127,7 +127,7 @@ test("help assets are local, packaged and do not add remote loads or documentati
   assert.ok(html.indexOf('src="/static/help.js"') < html.indexOf('src="/static/app.js"'));
   assert.doesNotMatch(helpMarkup, /(?:href|src)\s*=/i);
   assert.doesNotMatch(helpMarkup, /\/Users\/|\/home\/|https?:\/\//);
-  assert.match(fs.readFileSync(path.resolve(web, "../../pyproject.toml"), "utf8"), /tracelens_cli = \["web\/\*"\]/);
+  assert.match(fs.readFileSync(path.resolve(web, "../../../tracelens-tool/build.gradle"), "utf8"), /from\('\.\.\/tracelens-cli\/tracelens_cli\/web'\)/);
   assert.doesNotMatch(helpMarkup, /\b(?:docs|skills)\//i);
 });
 

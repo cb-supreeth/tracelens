@@ -5,19 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tracelens-cli"
 version = "0.1.1"
-description = "CLI for TraceLens: list, export and render line-level execution traces from a running Chargebee service"
+description = "Test environment for the TraceLens cb-app bootstrap scripts; the viewer, CLI and MCP ship in the Java distribution"
 requires-python = ">=3.10"
-# zero runtime dependencies by design (stdlib only) — trivially pipx-installable
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
 
-[project.scripts]
-tracelens = "tracelens_cli.cli:main"
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["tracelens_cli*"]
-
-[tool.setuptools.package-data]
-tracelens_cli = ["web/*"]
+# No Python package ships from here: tracelens_cli/web holds the browser assets
+# that tracelens-tool/build.gradle bundles into the Java distribution.
+[tool.setuptools]
+packages = []
