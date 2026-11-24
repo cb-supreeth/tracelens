@@ -24,8 +24,8 @@ explicitly configured application names are still respected.
   [distributed tracing](distributed-tracing.md) →
   [dependency visibility/change impact](dependency-visibility-and-change-impact.md).
 - **Starting or restarting cb-app with tracing:**
-  [optional Makefile installation and commands](cb-app-integration.md#optional-makefile-launcher).
-  The launcher is a template in this repo, not an automatically installed app dependency.
+  [guided setup](guided-setup.md), or the
+  [manual startup hook](cb-app-integration.md#enable-in-an-already-built-local-cb-app).
 - **Understand it as an author:** [codebase walkthrough](codebase-walkthrough.md) →
   [Byte Buddy internals](byte-buddy-instrumentation.md) →
   [visualization evidence rules](hybrid-visualization.md).

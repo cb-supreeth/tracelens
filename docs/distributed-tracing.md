@@ -318,8 +318,7 @@ not covered; tests exercise Vert.x 3.9.16, not every reactive application.
 
 ```bash
 JAVA_HOME=/path/to/jdk21 ./gradlew test :samples:standalone-smoke:standaloneSmoke :samples:standalone-smoke:distributedSmoke
-cd tracelens-cli
-uv run --extra test pytest -q
+node --test tracelens-cli/tests/*.test.cjs
 ```
 
 The distributed smoke suite launches isolated Java 8/Tomcat 7 and Java 21/Tomcat 10

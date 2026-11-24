@@ -36,124 +36,6 @@ on top of the guided startup hook.
 The sections below retain lower-level and existing checkout integrations for
 maintainers; they are not extra steps after the guided setup.
 
-## Managed setup with make up-tracelens
-
-This separate checkout-maintainer workflow remains available where the Makefile
-fragment is already installed. It is not the fresh-user setup/configuration UI:
-
-```bash
-cd ~/work/chargebee-app
-make up-tracelens
-```
-
-This needs Python 3.10+, JDK 21 for the agent build, `lsof` (normally available
-on macOS), and cb-app's normal local prerequisites. The app checkout must contain
-`Makefile` and `tomcat/bin`.
-The JDK 21 selection is confined to the agent build; the normal cb-app lifecycle
-still selects its Java 8 runtime. Use the
-[supplied-JAR route](sharing-and-configuration.md#using-a-supplied-jar-no-tracelens-checkout)
-instead if you do not want to clone/build TraceLens.
-
-This target supports native cb-app only, not its Docker image. It pins
-`--source chargebee-app` in `ORCH_FLAGS` and rejects an explicit `--image cb-app`
-or `--image chargebee-app`. Before running the app lifecycle, it rejects an app
-port owned by another checkout, container or process; stop that owner explicitly
-first. It does not stop a conflicting process for you.
-
-The [Makefile fragment](../scripts/cb-app-up-tracelens.mk) invokes
-[the bootstrap helper](../scripts/bootstrap_cb_app.py), which:
-
-1. Uses the sibling `cb-tracelens` checkout by default, cloning only if that path
-   does not exist. Existing checkouts, including dirty ones, are reused as-is:
-   no pull, reset or branch switch. Update an old checkout explicitly.
-2. Builds and checks the shaded agent using JDK 21 in a child process.
-3. Selects `chargebee-app/.run/tracelens/tracelens.json` by default, safely
-   migrating the previous default filename when needed. It seeds a new file from
-   the bundled config only when there is no selected existing config or previous
-   default to migrate. Existing capture settings are preserved; the managed route
-   requires `applicationId: cb-app`, a nonempty package list and explicit
-   `httpIncludePaths`. For an older managed setup missing that field, it migrates
-   the unambiguous literal startup path list into the JSON instead of broadening
-   capture. See [migration details](#one-json-file-for-capture-settings).
-4. Creates/updates `.run/tracelens/services.json`, refreshing the `cb-app` debug
-   URL and source root while preserving its other fields and other service
-   entries. A new registry contains cb-app only, not EMS.
-5. Maintains one opt-in managed block in `tomcat/bin/setenv.sh`. Before changing
-   an existing file, it saves a timestamped backup under `.run/tracelens/`.
-   Existing non-TraceLens settings are preserved. A recognized older source
-   hook is replaced and its managed path-list duplicate removed; ambiguous/manual
-   duplicate attachments or stale capture overrides are rejected with guidance.
-6. Runs normal `make up` with tracing enabled. If that reuses an existing JVM or
-   does not produce a fresh ready TraceLens instance, it runs `make start`
-   without the full app build, then waits for TraceLens readiness and app health.
-
-Normal `make up` may run its usual app build/fixture lifecycle when needed.
-The follow-up `make start` clears Tomcat logs and enables jobs, and any JVM
-restart clears live traces. Save important logs and captures before running
-this command, including on an already-healthy traced app: a new runtime instance
-is required. Readiness checks identity, port, package and HTTP path scope, recording/bridge
-status, a new service-instance ID and app health, and verifies that the app and
-agent listeners share the same PID/JVM. These checks do **not** prove the loaded
-JAR's hash, every effective setting or end-to-end request coverage.
-
-This target does not start the viewer, MCP or EMS. Use the combined JAR's
-[Java viewer/CLI commands](java-distribution.md#start-the-viewer), then
-[verify](#verify-and-inspect-by-api). A tooling-only refresh needs a viewer/MCP
-restart, not another app restart. The managed hook still does nothing
-without `TRACELENS=1`; normal startup remains opt-in.
-
-### Install the Makefile fragment in another checkout
-
-The target is available only where the fragment has been installed and included;
-its presence in TraceLens does not ship it into other cb-app checkouts or their
-upstream Makefile. From another `chargebee-app` checkout, copy the supplied
-fragment (adjust the TraceLens path):
-
-```bash
-cp -n /absolute/path/to/cb-tracelens/scripts/cb-app-up-tracelens.mk local-setup/tracelens.mk
-```
-
-If the destination already exists, review it instead of overwriting it. Add this
-line once to cb-app's `Makefile`, after its normal `up` target so the default
-target is unchanged:
-
-```make
-include local-setup/tracelens.mk
-```
-
-Also add `/.run/tracelens/` to cb-app's `.gitignore` so machine-local JSON and
-backups of startup settings are not accidentally committed. The installed
-integration in the current cb-app checkout already includes this ignore rule.
-
-The default clone URL is `git@github.com:chargebee-tech/cb-tracelens.git`.
-Until that private repository is published and your access is granted, point to
-an existing checkout; this bootstrap does not publish repositories or grant
-access. An inaccessible clone fails with guidance, without replacing an existing
-checkout.
-
-### Overrides and preparation only
-
-```bash
-make up-tracelens \
-  TRACELENS_HOME=/absolute/path/to/cb-tracelens \
-  TRACELENS_BUILD_JAVA_HOME=/absolute/path/to/jdk21 \
-  TRACELENS_PORT=7782
-
-make up-tracelens TRACELENS_PREPARE_ONLY=1
-```
-
-`TRACELENS_PREPARE_ONLY=1` still clones if necessary, builds the agent and writes
-configuration/registry/startup wiring; it is **not** a dry run. It skips app
-lifecycle commands and runtime readiness/port-availability checks.
-`TRACELENS_CONFIG` selects a custom absolute config path (its parent directory
-must exist); it is only a file selector, not another copy of capture settings.
-Otherwise edit `.run/tracelens/tracelens.json`. An existing selected JSON wins on
-subsequent setup runs; the bundled template initializes a new file only.
-App/TraceLens/config paths must be absolute and contain no spaces or shell
-metacharacters. `TRACELENS_REPO` overrides only the clone source,
-`TRACELENS_PYTHON` selects Python 3.10+, and `TRACELENS_START_TIMEOUT` controls the
-post-start readiness wait (default 180 seconds, range 1–1800).
-
 ## One JSON file for capture settings
 
 Use the selected service JSON for `httpIncludePaths`, `packages`, identity hooks
@@ -162,14 +44,6 @@ and retention together. The checkout-based default is
 selected installation's `cb-app/tracelens.json`. Use the path reported by your
 chosen setup, not a second copy. Launchers only wire the agent JAR,
 config-file path and debug port; they do not carry a second HTTP allowlist.
-
-For the default path, setup migrates the previous
-`.run/tracelens/cb-app.json` only when `.run/tracelens/tracelens.json` is absent.
-If both exist, it refuses the conflict rather than guessing, merging or
-overwriting either configuration. Review both and resolve which default file to
-keep before retrying, preserving any settings you need. An explicit
-`TRACELENS_CONFIG` continues to select that custom file instead; setup does not
-rename arbitrary custom configurations.
 
 The current [new-config template](../scripts/cb-app/tracelens.json) includes
 Features, Plans/items, metering/usage, subscriptions and related billing API/page
@@ -192,34 +66,15 @@ HTTP entries. Built-in ignored paths remain excluded. Scheduler/queue capture an
 distributed context propagation have separate controls.
 
 Generic agent configuration that omits the field keeps the compatibility default
-`["/"]`, but cb-app setup requires an explicit or safely migrated field so an
-upgrade cannot silently broaden its local capture scope.
+`["/"]`. For cb-app, set the field explicitly so an upgrade cannot silently
+broaden its local capture scope.
 
-When upgrading an older managed setup:
-
-1. If the selected JSON already contains `httpIncludePaths`, keep that list,
-   including existing Plans or other investigation paths. Setup removes a
-   matching managed startup duplicate; it does not replace your list with the
-   template. A different legacy list is a conflict requiring explicit resolution,
-   not permission to overwrite your JSON.
-2. If the field is absent, setup migrates an unambiguous literal path list from
-   the old managed hook into the JSON and removes that managed duplicate.
-3. If the old scope cannot be established, or legacy settings conflict, setup
-   stops with guidance. Review the previous scope and add `httpIncludePaths`
-   explicitly to the selected JSON before retrying. Do not guess a broader scope.
-4. Remove manual stale `TRACELENS_HTTP_PATHS` or
-   `-Dtracelens.http.includePaths` settings from your shell/startup wiring after
-   moving their intended values into the JSON. They are rejected, not supported
-   overrides. Preserve unrelated JVM options and application settings.
-
-Configuration is read at application startup, not hot-reloaded. Editing JSON or
-running preparation-only setup does not change an existing JVM. Save evidence,
+Configuration is read at application startup, not hot-reloaded. Editing JSON
+does not change an existing JVM. Save evidence,
 then choose the normal app restart when ready; reproduce afterward because old
 captures are not repaired.
 
 ## Build
-
-For manual setup or rebuilding outside the managed command:
 
 Build with JDK 21; the bridge, core and agent compile with `--release 8`:
 
@@ -243,16 +98,15 @@ Do not install a Spring starter, adapter, or extra Jackson jars in cb-app.
 
 ## Enable in an already built local cb-app
 
-This is the manual **checkout-based** alternative to `make up-tracelens`; it uses
-the repository helper, not the three-file supplied bundle. Choose one hook:
-do not add this source line alongside a managed or direct supplied-JAR block.
+This manual **checkout-based** route uses the repository helper, not the supplied
+setup ZIP. Choose one hook: do not add this source line alongside a guided-setup
+or direct supplied-JAR block.
 
 For a fresh cb-app environment, use its documented `make up` first. Adding
 TraceLens to an existing environment does not require rebuilding/seeding databases.
 
 For a new installation, create the app-local config once, preserving it on later
-updates. For an existing installation, complete the default-name migration above
-first rather than copying a template into a second default file:
+updates:
 
 ```bash
 cd ~/work/chargebee-app
@@ -261,7 +115,7 @@ cp -n /absolute/path/to/cb-tracelens/scripts/cb-app/tracelens.json .run/tracelen
 ```
 
 If it already exists, edit that file instead of overwriting it. For an older
-file without `httpIncludePaths`, migrate its intended scope as described above.
+file without `httpIncludePaths`, add the field with the paths you intend to capture.
 Use `TRACELENS_CONFIG=/absolute/path/to/custom/tracelens.json` only to select another file.
 
 Add this to `chargebee-app/tomcat/bin/setenv.sh`, preserving existing settings:
@@ -278,8 +132,7 @@ If your TraceLens checkout is not `$HOME/work/cb-tracelens`, set
 sourcing the helper from another location does not change its default checkout.
 For a manual cb-app checkout outside `$HOME/work/chargebee-app`, also select its
 app-local JSON explicitly with `TRACELENS_CONFIG`; the helper alone does not infer
-that location from the source line. The managed bootstrap and wrapper supply the
-selected path from their app checkout.
+that location from the source line.
 The helper rejects spaces and shell metacharacters in agent/config paths;
 use a checkout/config path compatible with that restriction.
 
@@ -417,62 +270,6 @@ if you override either service's agent port.
 
 To disable, restart without `TRACELENS=1`. To uninstall, remove only the TraceLens
 source line from `setenv.sh`; preserve other startup settings.
-
-### Optional Makefile launcher
-
-The older `Makefile.tracelens` wrapper remains supported for manually configured
-checkouts. Prefer [managed setup](#managed-setup-with-make-up-tracelens) for the
-short command and automatic agent build/wiring. The older wrapper defaults to
-the same app-local `.run/tracelens/tracelens.json`. Create that file once using the
-template, or use `TRACELENS_CONFIG` to select an existing custom configuration.
-
-After building the agent and adding the `setenv.sh` hook above, copy the
-[launcher template](../scripts/Makefile.cb-app-tracelens) into cb-app as a separate
-Makefile. The template is not installed by the TraceLens build. This leaves the
-existing `Makefile` and its normal startup unchanged:
-
-```bash
-cd ~/work/chargebee-app
-cp -n ../cb-tracelens/scripts/Makefile.cb-app-tracelens Makefile.tracelens
-make -f Makefile.tracelens check
-make -f Makefile.tracelens up
-```
-
-`up` delegates to the existing `make up`/service-orchestrator lifecycle with
-`TRACELENS=1`. It can run the normal build/fixture setup; use it with the same
-care as normal cb-app bring-up. An already-healthy JVM is reused, so `up` cannot
-attach TraceLens to an application that is already running without it. To load
-the agent or new configuration into an already-built app, use:
-
-```bash
-make -f Makefile.tracelens restart
-make -f Makefile.tracelens status
-```
-
-`restart` delegates to the existing `make start` hook, which restarts Tomcat with
-jobs enabled and clears existing Tomcat logs. It does not invoke the full build
-or fixture setup. Save important logs and trace captures before restarting.
-`status` reads the agent summary from port `7778` by default. Neither command
-starts EMS or the separate TraceLens viewer. Use normal `make down` to stop cb-app.
-
-The wrapper defaults to a sibling `cb-tracelens` checkout. Override its settings
-on the command line; `TRACELENS_HOME` and `TRACELENS_CONFIG` must be absolute paths
-because Tomcat changes its working directory during startup:
-
-```bash
-make -f Makefile.tracelens restart \
-  TRACELENS_HOME=/absolute/path/to/cb-tracelens \
-  TRACELENS_CONFIG=/absolute/path/to/chargebee-app/.run/tracelens/tracelens.json \
-  TRACELENS_PORT=7782
-```
-
-`check` checks for the source hook, readable agent/config files and supported
-startup settings without changing any service. It does not parse the JSON, test
-debug-port availability, or prove that the application started or instrumentation
-is working; use `status` and an authenticated request after startup. A fresh,
-unbuilt cb-app checkout still needs its normal initial setup before adding this
-opt-in launcher. `make -f Makefile.tracelens help`
-lists the available targets and overrides.
 
 ## Verify and inspect by API
 

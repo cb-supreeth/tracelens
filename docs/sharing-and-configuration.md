@@ -99,12 +99,7 @@ Build the current distribution with JDK 21:
 ```
 
 Distribute `build/distributions/tracelens-java-0.1.1-SNAPSHOT.zip`; recipients
-unpack it and run `./setup.sh`. Existing installations of the optional cb-app
-`make up-tracelens` integration can continue using its
-[separate lifecycle reference](cb-app-integration.md#managed-setup-with-make-up-tracelens),
-but should not layer it over a guided startup hook. It builds and runs normal
-application lifecycle commands with different side effects; it is not the
-configuration dashboard.
+unpack it and run `./setup.sh`.
 
 The lower-level standalone options below remain available for deliberate manual
 integrations. They are not extra steps after guided setup.
@@ -168,9 +163,8 @@ JSON file, uses explicit `tracelens.application-id`, then
 `spring.application.name`, then `cb-app`. The standalone agent does not read
 Spring's application properties. The cb-app repository and lifecycle service are
 named `chargebee-app`; its bundled TraceLens config and registry use `cb-app`.
-See the [cb-app integration guide](cb-app-integration.md), including managed
-`make up-tracelens`, the older optional `Makefile.tracelens` wrapper and lifecycle
-caveats.
+See the [cb-app integration guide](cb-app-integration.md), including the manual
+startup hook and lifecycle caveats.
 
 ### 3. Optionally share `tracelens.json`
 

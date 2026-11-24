@@ -6,7 +6,7 @@ if [ "${TRACELENS:-0}" = "1" ]; then
     TRACELENS_AGENT="${TRACELENS_AGENT:-$TRACELENS_HOME/tracelens-agent/build/libs/tracelens-agent-$TRACELENS_VERSION-agent.jar}"
     TRACELENS_CONFIG="${TRACELENS_CONFIG:-$HOME/work/chargebee-app/.run/tracelens/tracelens.json}"
     if [ "${TRACELENS_HTTP_PATHS+x}" = "x" ]; then
-        echo "TraceLens capture paths now belong in JSON httpIncludePaths. Run make up-tracelens to migrate the old managed setenv block, or remove the obsolete TRACELENS_HTTP_PATHS override." >&2
+        echo "TraceLens capture paths now belong in JSON httpIncludePaths. Move those paths into httpIncludePaths in the selected tracelens.json and remove the obsolete TRACELENS_HTTP_PATHS override." >&2
         return 1
     fi
     TRACELENS_PORT="${TRACELENS_PORT:-7778}"

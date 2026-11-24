@@ -1,5 +1,27 @@
 # TraceLens handover
 
+## Update 2026-11-24 — Python removed entirely (model: Opus 5.5)
+
+**Done:** Removed the last Python: `make up-tracelens` (`scripts/bootstrap_cb_app.py`
+and `scripts/cb-app-up-tracelens.mk`), the older `scripts/Makefile.cb-app-tracelens`
+wrapper, their two pytest files, `tracelens-cli/pyproject.toml` and `uv.lock`. The
+user chose removal over porting; the Java `setup` command (guided setup) is now the
+one supported way to set up cb-app, plus the manual `cb-app-setenv.sh` hook.
+`scripts/run-cb-ems-with-agent.sh` now detaches with `nohup` instead of a Python
+`setsid` block. Docs no longer describe or link the removed workflow; test
+commands are Gradle plus `node --test` only.
+
+**Kept on purpose:** Java parity tests and their frozen fixtures (Java only); code
+comments explaining behavior that matches the old Python; `.gitignore` entries for
+local Python leftovers; the startup "Storage note" about Python writers, because
+earlier wheels were shared (Notion, 2026-10-19) and may still be installed.
+
+**Verified:** `./gradlew test :tracelens-agent:javaBundle --offline` exit 0;
+`node --test tracelens-cli/tests/*.test.cjs` all pass; `sh -n` on the EMS helper.
+Not run: the EMS helper itself (it starts cb-ems). Anyone who installed the
+`make up-tracelens` fragment in a cb-app checkout keeps a `local-setup/tracelens.mk`
+that now fails with "scripts/bootstrap_cb_app.py is missing".
+
 ## Update 2026-11-24 — Python removal, portable registry, snapshot recovery (model: Fable 5.2)
 
 **Done (three separate changes, uncommitted on branch

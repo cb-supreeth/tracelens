@@ -180,9 +180,6 @@ they do not mutate a developer's capture stores or application services.
   :tracelens-agent:javaBundle --console=plain
 
 node --test tracelens-cli/tests/*.test.cjs
-
-cd tracelens-cli
-uv run --extra test pytest -q   # cb-app bootstrap script tests only
 ```
 
 The Gradle build uses JDK 21; the smoke tasks also require a locally installed

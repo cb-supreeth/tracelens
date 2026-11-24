@@ -1,7 +1,6 @@
 #!/bin/sh
 # Dev helper: boot the locally built cb-ems jar with the tracelens agent attached,
-# fully detached (new session via python setsid) so the process survives the
-# launching shell. Mirrors the env of cb-ems's Makefile `start` target.
+# detached with nohup so the process survives the launching shell. Mirrors the env of cb-ems's Makefile `start` target.
 # Usage: run-cb-ems-with-agent.sh [agent.jar] [config.json]
 set -eu
 
@@ -19,22 +18,12 @@ mkdir -p "$CB_EMS_DIR/.run"
 RDS_HOSTNAME=localhost RDS_PORT=5432 RDS_DB_NAME=chargebee_ems \
 RDS_USERNAME=cb_ems RDS_PASSWORD=dbpassword \
 AWS_PROFILE=cb-ems AWS_REGION=us-east-1 \
-python3 - "$JAVA_BIN" "$AGENT_JAR" "$CONFIG" "$JAR" "$LOG" <<'EOF'
-import subprocess, sys
-
-java_bin, agent_jar, config, jar, log = sys.argv[1:6]
-cmd = [
-    java_bin,
-    "-Daws.profile.name=cb-ems",
-    "-Dserver.port=8082",
-    f"-javaagent:{agent_jar}=standalone",
-    f"-Dtracelens.configPath={config}",
-    "-Dtracelens.port=7779",
-    "-Dtracelens.enabled=false",
-    "-jar", jar,
-]
-with open(log, "wb") as out:
-    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
-                            start_new_session=True)
-print(f"cb-ems started (pid {proc.pid}), log: {log}")
-EOF
+nohup "$JAVA_BIN" \
+  -Daws.profile.name=cb-ems \
+  -Dserver.port=8082 \
+  "-javaagent:$AGENT_JAR=standalone" \
+  "-Dtracelens.configPath=$CONFIG" \
+  -Dtracelens.port=7779 \
+  -Dtracelens.enabled=false \
+  -jar "$JAR" </dev/null >"$LOG" 2>&1 &
+echo "cb-ems started (pid $!), log: $LOG"

@@ -606,7 +606,7 @@ The `samples/line-spike` module validates the major mechanics:
 - `SegmentSpikeApp`: root trace and continued SQS-style segment
 
 The repository has Java tests across bridge, core, agent, and starter modules, plus
-browser tests for the viewer and pytest checks for the cb-app bootstrap scripts. Important seams include load-time
+browser tests for the viewer. Important seams include load-time
 lambda weaving, JDK executor retransformation, HTTP/HTTPS propagation safety, and
 SDK-shaped messaging fixtures. Those messaging fixtures make no broker/network
 calls; they verify matching and metadata behavior, not production broker delivery.
@@ -615,9 +615,7 @@ Run them with:
 
 ```bash
 ./gradlew test
-
-cd tracelens-cli
-uv run --extra test pytest -q
+node --test tracelens-cli/tests/*.test.cjs
 ```
 
 Integration checks are explicit Gradle tasks, not implied by `./gradlew test`:

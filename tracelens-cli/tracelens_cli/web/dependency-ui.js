@@ -7,7 +7,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function (sqlValues, evidenceCopy) {
   "use strict";
   const text = value => typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, " ").slice(0, 256) : "";
-  // Keep raw-event projection aligned with dependencies.py. Clipping free text
+  // Keep raw-event projection aligned with Dependencies.java. Clipping free text
   // is not a substitute for rejecting payload-like metadata or URL credentials.
   const token = (value, pattern = /^[A-Za-z0-9_$][A-Za-z0-9_.$:-]{0,127}$/) =>
     typeof value === "string" && value.length <= 128 && !/[^\x20-\x7e]/.test(value) && pattern.test(value) ? value : null;

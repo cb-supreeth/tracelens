@@ -507,9 +507,7 @@ automatically migrate arbitrary manual installations. Preserve custom settings
 and saved evidence when reviewing an existing integration.
 For manual attachment, CLI/MCP commands and storage details, use the
 [Java distribution reference](java-distribution.md) and
-[private capture-storage guide](java-capture-storage.md). Checkout-based
-`make up-tracelens` remains a separate workflow with its own build/lifecycle
-side effects; do not layer it over the guided hook.
+[private capture-storage guide](java-capture-storage.md).
 
 ## Troubleshooting
 

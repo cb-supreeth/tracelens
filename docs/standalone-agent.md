@@ -318,9 +318,6 @@ agent port, not the old application port. No production deployment is implied.
 The cb-app startup helper now selects standalone mode. Its earlier installed
 adapter and `web.xml` registration can be removed; only the JVM option hook is
 needed. See [cb-app setup](cb-app-integration.md).
-Its [optional Makefile launcher](cb-app-integration.md#optional-makefile-launcher)
-is a template to copy explicitly: `up` can reuse an already-healthy JVM, while
-`restart` loads the agent/config into an already-built app and clears Tomcat logs.
 
 Restart the target JVM after replacing the agent JAR or changing its configuration;
 editing JSON alone does not require an application rebuild. Replace/restart the

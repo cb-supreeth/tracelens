@@ -44,8 +44,8 @@ production overhead.
   prerequisites, limitations and roadmap ideas.
 - [Documentation index](docs/README.md): reading paths and every detailed guide.
 - [Standalone setup](docs/standalone-agent.md): recommended agent-only installation.
-- [cb-app setup with make up-tracelens](docs/cb-app-integration.md#managed-setup-with-make-up-tracelens):
-  build/setup and opt-in startup using cb-app's existing lifecycle.
+- [cb-app setup](docs/cb-app-integration.md): guided setup, or the manual
+  checkout-based startup hook.
 - [Codebase walkthrough](docs/codebase-walkthrough.md) and
   [Byte Buddy internals](docs/byte-buddy-instrumentation.md): how capture works.
 - [Dependency visibility and change impact](docs/dependency-visibility-and-change-impact.md):
@@ -72,7 +72,7 @@ Exporting evidence from the debug API is a separate read operation.
 | Standalone debug API | JDK HTTP server on loopback |
 | Viewer/MCP | Java 8+ tooling, JDK HTTP server, Jackson, stdio MCP |
 | Browser | Plain HTML/CSS/JavaScript and SVG; no frontend framework/chart dependency |
-| Build/tests | Gradle/Shadow, JUnit/AssertJ and Node's built-in test runner; pytest for the cb-app bootstrap scripts |
+| Build/tests | Gradle/Shadow, JUnit/AssertJ and Node's built-in test runner |
 
 The combined artifact version is `0.1.1-SNAPSHOT`. A version label alone does not
 prove which build an existing JVM is running.
@@ -209,9 +209,6 @@ From the repository root:
 ```bash
 ./gradlew test :tracelens-agent:shadowJar
 node --test tracelens-cli/tests/*.test.cjs
-
-cd tracelens-cli
-uv run --extra test pytest -q
 ```
 
 Node is needed for browser-logic tests, not to run the viewer. With an installed
@@ -248,10 +245,9 @@ middleware is not offered. Review each service's changes before saving and
 confirm any supported start/restart separately. A saved configuration is not
 proof that the service is running with it.
 
-For checkout-based cb-app workflows, the optional
-[Makefile integration](docs/cb-app-integration.md#managed-setup-with-make-up-tracelens)
-documents `make up-tracelens`, prerequisites, startup-hook ownership and restart
-effects. Do not layer guided setup over an existing managed hook. Use
+For a checkout-based cb-app hook, see the
+[cb-app guide](docs/cb-app-integration.md#enable-in-an-already-built-local-cb-app).
+Do not layer guided setup over an existing startup hook. Use
 [manual attachment](docs/java-distribution.md) for reviewed existing launchers.
 
 The Spring Boot starter and javax servlet adapter remain supported **optional
